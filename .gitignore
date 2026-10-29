@@ -1,0 +1,30 @@
+# All pose and costume images live under img/ and are intentionally versioned.
+# Source snapshots and private/local content are not part of the website.
+/metadata/
+/private/
+/catalog.local.json
+
+# Generated artifacts and runtime files.
+/dist/
+__pycache__/
+*.py[cod]
+*.sqlite
+*.db
+*.part
+*.tmp
+.DS_Store
+Thumbs.db
+node_modules/
+.pytest_cache/
+.venv/
+venv/
+.idea/
+.vscode/
+.env
+.env.*
+!.env.example
+
+# Export bundles can inadvertently contain third-party assets.
+*.zip
+*.tar
+*.tar.gz

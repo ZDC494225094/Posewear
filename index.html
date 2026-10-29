@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="ai-reference-gallery — a lightweight, multilingual reference image gallery for licensed creative assets.">
+  <title>ai-reference-gallery — AI Reference Gallery</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="intro">
+      <div class="header-top">
+        <p class="eyebrow" id="eyebrow">AI 创作参考图库 · 开源浏览器</p>
+        <div class="language-switch" role="group" aria-label="Language / 语言 / 言語">
+          <button id="lang-zh" type="button" lang="zh-CN" aria-pressed="true">中文</button>
+          <button id="lang-en" type="button" lang="en" aria-pressed="false">EN</button>
+          <button id="lang-ja" type="button" lang="ja" aria-pressed="false">日本語</button>
+        </div>
+      </div>
+      <h1>ai-reference-gallery <em id="tagline">AI 素材参考图鉴</em></h1>
+      <p class="muted" id="description">浏览姿势与服装参考素材。</p>
+      <div id="counts" class="muted">加载中…</div>
+    </div>
+  </header>
+  <main>
+    <nav class="type-tabs" aria-label="素材类型" id="type-tabs">
+      <button id="type-pose" class="active" type="button" aria-pressed="true">姿势素材</button>
+      <button id="type-costume" type="button" aria-pressed="false">服装素材</button>
+    </nav>
+    <section class="filters">
+      <label><span id="search-label">搜索编号、名称或分类</span><input id="query" type="search" placeholder="输入关键词"></label>
+      <label><span id="category-label">分类</span><select id="category"><option value="">全部分类</option></select></label>
+      <label id="angle-filter"><span id="angle-label">角度</span><select id="angle"><option value="">全部角度</option></select></label>
+      <label id="view-filter"><span id="view-label">展示</span><select id="view"><option id="view-pose" value="pose">按姿势组</option><option id="view-image" value="image">逐张图片</option></select></label>
+    </section>
+    <nav id="series" class="series"></nav>
+    <div class="summary"><span id="result" aria-live="polite">正在载入索引…</span><button id="reset" type="button">重置筛选</button></div>
+    <section id="grid" class="grid"></section>
+    <div class="load-more-wrap"><button id="load-more" type="button" hidden>加载更多</button></div>
+  </main>
+  <footer><span id="footer-note">本站仅提供图库浏览工具；请仅加载你有权使用的素材。</span>
+    <a href="https://ai-pose-gallery.pages.dev/" rel="noopener noreferrer" target="_blank" id="source-link">原始素材来源及使用条款</a>
+  </footer>
+  <div id="overlay" class="overlay" hidden>
+    <div class="dialog" role="dialog" aria-modal="true" aria-label="姿势图片预览" id="dialog">
+      <div class="dialog-top">
+        <div><div id="imageId" class="code"></div><h2 id="poseTitle"></h2><p id="imageMeta" class="muted"></p></div>
+        <button id="close" type="button" class="close" aria-label="关闭">×</button>
+      </div>
+      <div class="big-image">
+        <button id="prev" type="button" aria-label="上一组">‹</button>
+        <img id="largeImage" alt="姿势图片">
+        <button id="next" type="button" aria-label="下一组">›</button>
+      </div>
+      <nav id="angles" class="angles"></nav>
+      <div class="dialog-bottom"><span id="position" class="muted"></span><a id="download" download>下载图片</a></div>
+      <p class="hint" id="keyboard-hint">← → 切换角度，↑ ↓ 切换姿势，Esc 关闭</p>
+    </div>
+  </div>
+  <script src="catalog.js" defer></script>
+  <script src="costume-catalog.js" defer></script>
+  <script src="i18n.js" defer></script>
+  <script src="app.js" defer></script>
+</body>
+</html>
