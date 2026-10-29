@@ -64,6 +64,62 @@ cd ai-reference-gallery
 
 **本地导出注意**：通过 `file://` 打开时，复制或导出组合图需要根据页面提示授权读取项目的 **`img` 文件夹**（含 `pose/` 和 `costume/`）；通过同源 HTTP 网站访问则无需此步骤。复制图片还需要浏览器支持图片剪贴板功能，不能复制时可使用 PNG 下载。
 
+## Agent Skill：用自然语言制作参考图
+
+除了网页操作，仓库还提供可供 **Codex 等兼容 Agent Skills 的助手**使用的 [`ai-reference-gallery` Skill](.agents/skills/ai-reference-gallery/SKILL.md)。它会调用真实图库索引和本地 Canvas 合成程序，**直接生成参考板 PNG**，而不是只回复图片编号或提示词。
+
+| 能力 | 效果 |
+| --- | --- |
+| 素材搜索 | 中文 / 英文 / 日文关键词、分类、姿势角度与真实素材编号 |
+| 智能搭配 | 按条件随机挑选姿势和服装，支持固定随机种子、单独锁定某张素材 |
+| 双图 / 三图 | 姿势 + 服装 + 可选本地人物照片；也可上传自己的服装照片 |
+| 批量制作 | 一次生成最多 20 组独立的 PNG 参考板 |
+| 四宫格 / 九宫格 | **一张 2×2 / 3×3 对比图**：每格都是一套姿势与服装参考，可选人物照片 |
+| 提示词与记录 | 同时导出 `.txt` 提示词和 `.json` 素材编号、格子位置等信息 |
+
+### 四宫格 / 九宫格效果
+
+**四宫格：**一张图展示 4 组不同的姿势与服装搭配。
+
+![AI Reference Gallery Skill 四宫格示例](docs/skill-four-grid.jpg)
+
+**九宫格：**固定同一套服装，对比 9 种姿势。
+
+![AI Reference Gallery Skill 九宫格示例](docs/skill-nine-grid.jpg)
+
+> 宫格是**参考素材搭配对比图**，不是 AI 直接生成的四张或九张真人成品照片；**目前仅 Skill 支持宫格功能，网页中尚未添加**。
+
+### 在 Codex 中使用
+
+使用支持仓库级 Agent Skills 的助手打开项目根目录，技能定义位于 `.agents/skills/ai-reference-gallery/SKILL.md`。例如：
+
+> `$ai-reference-gallery` 随机找 9 组春季穿搭，生成一张九宫格参考图，并输出每格的 AI 生图提示词。
+
+也可以直接在项目根目录用命令行运行（无需启动网站）：
+
+```bash
+# 1. 搜索真实姿势素材
+node .agents/skills/ai-reference-gallery/scripts/gallery.cjs search --type pose --query "站姿" --limit 5
+
+# 2. 批量生成 5 张独立的双图参考板
+node .agents/skills/ai-reference-gallery/scripts/gallery.cjs compose --pose-category 站姿 --count 5 --seed demo --out-dir output/demo
+
+# 3. 四宫格：4 组春季搭配合成 1 张 PNG
+node .agents/skills/ai-reference-gallery/scripts/gallery.cjs grid --size 4 --pose-category 站姿 --outfit-category spring --seed four-demo --out output/four-grid.png
+
+# 4. 九宫格：固定服装，展示 9 种姿势
+node .agents/skills/ai-reference-gallery/scripts/gallery.cjs grid --size 9 --outfit-id SPR-0001 --seed nine-demo --out output/nine-grid.png
+
+# 5. 加入自己的角色照片，生成三图参考板
+node .agents/skills/ai-reference-gallery/scripts/gallery.cjs compose --pose-id full_sexy_P001_front --outfit-id SPR-0001 --person "C:/Photos/person.png" --out output/my-reference.png
+```
+
+每个输出名称对应三个文件：`xxx.png`（实际合成图）、`xxx.txt`（可复制的 AI 创作提示词）、`xxx.json`（使用的素材和生成信息）。宫格文件的 JSON 还记录每格的行列位置及素材编号，方便复现。
+
+**运行要求：**Node.js **22+** 和本机 **Chrome 或 Edge**（仅搜索命令不需要浏览器）。如未自动识别浏览器，可设置 `CHROME_PATH`；无需 npm 依赖、API Key 或云端生图服务。默认输出位于 `output/skill-compositions/` 或 `output/skill-grids/`，已被 Git 忽略，不会把人物照片或生成结果上传到仓库。
+
+更多参数、批量生成和问题排查请看 [Skill 使用说明](.agents/skills/ai-reference-gallery/references/usage.md)。
+
 ## 项目文件
 
 - `index.html` / `app.js`：网页入口与图库交互。
