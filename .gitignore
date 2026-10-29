@@ -6,6 +6,7 @@
 
 # Generated artifacts and runtime files.
 /dist/
+/.wrangler/
 __pycache__/
 *.py[cod]
 *.sqlite

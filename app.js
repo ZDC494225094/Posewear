@@ -6,9 +6,9 @@ const label = (item, field) => i18n.label(item, field);
 const state = {
   type: "pose", poseImages: [], costumeImages: [], images: [], records: [], cards: [],
   series: "", category: "", angle: "", search: "", view: "pose",
-  visibleCount: 60, current: -1, selected: null
+  visibleCount: 60, current: -1, selected: null,
+  composition: { pose: null, second: null, layout: "horizontal", background: "white", labels: true, swapped: false }
 };
-
 function uniq(arr) { return [...new Set(arr)]; }
 function element(tag, className, text) {
   const e = document.createElement(tag);
@@ -16,6 +16,13 @@ function element(tag, className, text) {
   if (text !== undefined) e.textContent = String(text);
   return e;
 }
+const composeUI = window.ReferenceCompositionUI({
+  state, t, $, element,
+  composition: window.ReferenceComposition,
+  choosePose: () => switchType("pose"),
+  chooseCostume: () => switchType("costume"),
+  openComposition: () => switchType("compose")
+});
 function groupImages(records) {
   const result = new Map();
   for (const img of records) {
@@ -107,6 +114,7 @@ function createCard(card, index) {
   return root;
 }
 function render() {
+  if (state.type === "compose") return;
   updateSeries();
   state.records = state.images.filter(matches);
   if (state.type === "pose" && state.view === "pose") {
@@ -145,6 +153,7 @@ function drawImage() {
   $("largeImage").alt = $("poseTitle").textContent;
   $("download").href = image.original;
   $("download").download = image.id + (image.original.toLowerCase().endsWith(".svg") ? ".svg" : ".png");
+  $("add-to-compose").textContent = t(state.type === "pose" ? "addPose" : "addCostume");
   $("position").textContent = (state.current + 1) + " / " + state.cards.length;
   $("angles").hidden = costume;
   $("angles").replaceChildren(...(costume ? [] : card.images.map((item) => {
@@ -176,28 +185,56 @@ function refreshStaticText() {
     eyebrow: "eyebrow", tagline: "tagline", description: "description",
     "search-label": "searchLabel", "category-label": "categoryLabel", "angle-label": "angleLabel",
     "view-label": "viewLabel", "view-pose": "viewPose", "view-image": "viewImage",
-    reset: "reset", "footer-note": "footer", "source-link": "source",
+    reset: "reset", "footer-note": "footer",
     download: "download", "keyboard-hint": "hint"
   })) $(id).textContent = t(key);
+  document.title = t("pageTitle");
+  $("collection-eyebrow").textContent = t("collectionEyebrow");
+  $("collection-title").textContent = t(state.type === "compose" ? "collectionCompose" :
+    state.type === "costume" ? "collectionCostume" : "collectionPose");
+  $("type-tabs").setAttribute("aria-label", t("typeNav"));
+  $("social-nav").setAttribute("aria-label", t("socialNav"));
+  $("footer-social-nav").setAttribute("aria-label", t("socialNav"));
+  document.querySelector(".filters").setAttribute("aria-label", t("filterNav"));
+  $("grid").setAttribute("aria-label", t("galleryNav"));
   $("type-pose").textContent = t("typePose");
   $("type-costume").textContent = t("typeCostume");
+  $("type-compose").textContent = t("typeCompose");
   $("type-pose").classList.toggle("active", state.type === "pose");
   $("type-costume").classList.toggle("active", state.type === "costume");
+  $("type-compose").classList.toggle("active", state.type === "compose");
   $("type-pose").setAttribute("aria-pressed", String(state.type === "pose"));
   $("type-costume").setAttribute("aria-pressed", String(state.type === "costume"));
+  $("type-compose").setAttribute("aria-pressed", String(state.type === "compose"));
   if (state.type === "costume") {
     $("description").textContent = t("costumeDescription");
     $("search-label").textContent = t("costumeSearchLabel");
     $("keyboard-hint").textContent = t("costumeHint");
+  } else if (state.type === "compose") {
+    $("description").textContent = t("composeDescription");
   }
   $("query").placeholder = t(state.type === "costume" ? "costumeSearchPlaceholder" : "searchPlaceholder");
   $("load-more").textContent = t("loadMore");
-  $("source-link").href = state.type === "costume"
-    ? "https://ai-costume-gallery.pages.dev/" : "https://ai-pose-gallery.pages.dev/";
-  $("dialog").setAttribute("aria-label", t("dialog"));
+  $("dialog").setAttribute("aria-label", t(state.type === "costume" ? "costumeDialog" : "dialog"));
   $("close").setAttribute("aria-label", t("close"));
   $("prev").setAttribute("aria-label", t("previous"));
   $("next").setAttribute("aria-label", t("next"));
+  $("add-to-compose").textContent = t(state.type === "costume" ? "addCostume" : "addPose");
+  for (const [id, key] of Object.entries({
+    "compose-pose-label": "composePose", "compose-costume-label": "composeSecond",
+    "compose-pose-empty": "composeEmptyPose", "compose-costume-empty": "composeEmptySecond",
+    "compose-choose-pose": "choosePose", "compose-choose-costume": "chooseCostume",
+    "compose-upload": "uploadImage", "compose-preview-eyebrow": "composeEyebrow",
+    "compose-preview-title": "composePreview", "compose-layout-label": "composeLayout",
+    "compose-horizontal": "composeHorizontal", "compose-vertical": "composeVertical",
+    "compose-bg-label": "composeBg", "compose-white": "composeWhite",
+    "compose-soft": "composeSoft", "compose-labels-label": "composeLabels",
+    "compose-swap": "composeSwap", "compose-help": "composeHelp",
+    "compose-download": "composeDownload", "compose-folder-button": "composeFolder",
+    "compose-local-title": "composeLocalTitle", "compose-local-step": "composeLocalStep",
+    "compose-local-public": "composeLocalPublic"
+  })) $(id).textContent = t(key);
+  if (!state.composition.pose || !state.composition.second) $("compose-placeholder").textContent = t("composePlaceholder");
   $("lang-zh").setAttribute("aria-pressed", i18n.locale === "zh-CN" ? "true" : "false");
   $("lang-en").setAttribute("aria-pressed", i18n.locale === "en" ? "true" : "false");
   $("lang-ja").setAttribute("aria-pressed", i18n.locale === "ja" ? "true" : "false");
@@ -208,8 +245,10 @@ function refreshStaticText() {
 function changeLanguage(locale) {
   i18n.setLocale(locale);
   refreshStaticText();
-  updateCategories(); updateAngles();
-  if (state.images.length) render();
+  if (state.type !== "compose") {
+    updateCategories(); updateAngles();
+    if (state.images.length) render();
+  } else composeUI.updateComposition();
   if (!$("overlay").hidden) drawImage();
 }
 function initialize() {
@@ -241,13 +280,36 @@ function switchType(type) {
   if (state.type === type) return;
   if (!$("overlay").hidden) closeImage();
   state.type = type;
+  $("browser-panel").hidden = type === "compose";
+  $("compose-panel").hidden = type !== "compose";
+  if (type === "compose") {
+    refreshStaticText();
+    composeUI.updateComposition();
+    return;
+  }
   state.images = type === "costume" ? state.costumeImages : state.poseImages;
   resetFilters();
   updateAngles();
   refreshStaticText();
 }
+function addCurrentToComposition() {
+  if (!state.selected) return;
+  if (state.type === "pose") {
+    state.composition.pose = state.selected;
+    closeImage();
+    switchType("costume");
+  } else if (state.type === "costume") {
+    composeUI.releaseUploadedImage();
+    state.composition.second = state.selected;
+    closeImage();
+    switchType("compose");
+  }
+}
 $("type-pose").onclick = () => switchType("pose");
 $("type-costume").onclick = () => switchType("costume");
+$("type-compose").onclick = () => switchType("compose");
+$("add-to-compose").onclick = addCurrentToComposition;
+composeUI.bind();
 $("lang-zh").onclick = () => changeLanguage("zh-CN");
 $("lang-en").onclick = () => changeLanguage("en");
 $("lang-ja").onclick = () => changeLanguage("ja");

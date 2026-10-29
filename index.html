@@ -4,43 +4,154 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="ai-reference-gallery — a lightweight, multilingual reference image gallery for licensed creative assets.">
-  <title>ai-reference-gallery — AI Reference Gallery</title>
+  <meta name="theme-color" content="#f5f5f7">
+  <title>Reference Gallery — AI 创作参考素材库</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="composition.css">
 </head>
 <body>
-  <header>
-    <div class="intro">
-      <div class="header-top">
-        <p class="eyebrow" id="eyebrow">AI 创作参考图库 · 开源浏览器</p>
+  <header class="site-header">
+    <div class="header-top">
+      <div class="brand" aria-label="Reference Gallery">
+        <span class="brand-icon" aria-hidden="true">R</span>
+        <span class="brand-name">Reference <strong>Gallery</strong></span>
+      </div>
+      <div class="header-actions">
+        <nav class="social-links" aria-label="社交与项目链接" id="social-nav">
+          <a class="social-link" href="https://github.com/vculjp/ai-reference-gallery" target="_blank" rel="noopener noreferrer" id="github-link" aria-label="GitHub · ai-reference-gallery">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 3.1a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
+            </svg>
+            <span>GitHub</span>
+          </a>
+          <a class="social-link" href="https://x.com/uljpVc" target="_blank" rel="noopener noreferrer" id="x-link" aria-label="X · @uljpVc">
+            <span class="social-x-icon" aria-hidden="true">𝕏</span>
+            <span>@uljpVc</span>
+          </a>
+        </nav>
         <div class="language-switch" role="group" aria-label="Language / 语言 / 言語">
           <button id="lang-zh" type="button" lang="zh-CN" aria-pressed="true">中文</button>
           <button id="lang-en" type="button" lang="en" aria-pressed="false">EN</button>
           <button id="lang-ja" type="button" lang="ja" aria-pressed="false">日本語</button>
         </div>
       </div>
-      <h1>ai-reference-gallery <em id="tagline">AI 素材参考图鉴</em></h1>
-      <p class="muted" id="description">浏览姿势与服装参考素材。</p>
-      <div id="counts" class="muted">加载中…</div>
+    </div>
+    <div class="intro">
+      <div class="hero-copy">
+        <p class="eyebrow" id="eyebrow">AI 创作参考图库</p>
+        <h1 id="tagline">灵感，从这里开始。</h1>
+        <p class="muted" id="description">浏览姿势与服装参考素材。</p>
+        <div class="hero-counts">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="counts">加载中…</span>
+        </div>
+      </div>
     </div>
   </header>
   <main>
-    <nav class="type-tabs" aria-label="素材类型" id="type-tabs">
-      <button id="type-pose" class="active" type="button" aria-pressed="true">姿势素材</button>
-      <button id="type-costume" type="button" aria-pressed="false">服装素材</button>
-    </nav>
-    <section class="filters">
-      <label><span id="search-label">搜索编号、名称或分类</span><input id="query" type="search" placeholder="输入关键词"></label>
+    <div class="collection-heading">
+      <div>
+        <p class="section-eyebrow" id="collection-eyebrow">CURATED LIBRARY</p>
+        <h2 id="collection-title">探索姿势素材</h2>
+      </div>
+      <nav class="type-tabs" aria-label="素材类型" id="type-tabs">
+        <button id="type-pose" class="active" type="button" aria-pressed="true">姿势素材</button>
+        <button id="type-costume" type="button" aria-pressed="false">服装素材</button>
+        <button id="type-compose" type="button" aria-pressed="false">组合制作</button>
+      </nav>
+    </div>
+    <div id="browser-panel">
+    <section class="filters" aria-label="素材筛选">
+      <label class="search-field">
+        <span id="search-label">搜索编号、名称或分类</span>
+        <span class="input-wrap">
+          <svg class="search-icon" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true">
+            <circle cx="11" cy="11" r="7"></circle>
+            <path d="m16.25 16.25 4.5 4.5"></path>
+          </svg>
+          <input id="query" type="search" placeholder="输入关键词" autocomplete="off">
+        </span>
+      </label>
       <label><span id="category-label">分类</span><select id="category"><option value="">全部分类</option></select></label>
       <label id="angle-filter"><span id="angle-label">角度</span><select id="angle"><option value="">全部角度</option></select></label>
       <label id="view-filter"><span id="view-label">展示</span><select id="view"><option id="view-pose" value="pose">按姿势组</option><option id="view-image" value="image">逐张图片</option></select></label>
     </section>
     <nav id="series" class="series"></nav>
-    <div class="summary"><span id="result" aria-live="polite">正在载入索引…</span><button id="reset" type="button">重置筛选</button></div>
-    <section id="grid" class="grid"></section>
+    <div class="summary">
+      <span id="result" aria-live="polite">正在载入索引…</span>
+      <button id="reset" type="button">重置筛选</button>
+    </div>
+    <section id="grid" class="grid" aria-label="素材列表"></section>
     <div class="load-more-wrap"><button id="load-more" type="button" hidden>加载更多</button></div>
+    </div>
+    <section id="compose-panel" class="compose-panel" hidden aria-label="组合工作台">
+      <div class="compose-selection">
+        <article class="compose-slot">
+          <div class="compose-slot-head"><span id="compose-pose-label">01 · 姿势</span><span id="compose-pose-id"></span></div>
+          <div class="compose-slot-preview" id="compose-pose-preview"><span id="compose-pose-empty">尚未选择姿势</span></div>
+          <button type="button" class="compose-choose" id="compose-choose-pose">选择姿势</button>
+        </article>
+        <article class="compose-slot">
+          <div class="compose-slot-head"><span id="compose-costume-label">02 · 服装或图片</span><span id="compose-costume-id"></span></div>
+          <div class="compose-slot-preview" id="compose-costume-preview"><span id="compose-costume-empty">尚未选择图片</span></div>
+          <div class="compose-slot-actions">
+            <button type="button" class="compose-choose" id="compose-choose-costume">选择服装</button>
+            <button type="button" class="compose-secondary" id="compose-upload">上传图片</button>
+          </div>
+          <input type="file" id="compose-upload-input" accept="image/png,image/jpeg,image/webp" hidden>
+        </article>
+      </div>
+      <div class="compose-editor">
+        <div class="compose-editor-head">
+          <div><p class="section-eyebrow" id="compose-preview-eyebrow">LIVE PREVIEW</p><h3 id="compose-preview-title">组合预览</h3></div>
+          <span id="compose-size">2400 × 1600 PNG</span>
+        </div>
+        <div class="compose-canvas-wrap">
+          <canvas id="compose-canvas" width="1200" height="800" aria-label="组合预览"></canvas>
+          <div class="compose-placeholder" id="compose-placeholder">选择姿势和第二张图片后即可预览</div>
+        </div>
+        <div class="compose-tools">
+          <label><span id="compose-layout-label">排列方式</span>
+            <select id="compose-layout"><option value="horizontal" id="compose-horizontal">左右拼图</option><option value="vertical" id="compose-vertical">上下拼图</option></select>
+          </label>
+          <label><span id="compose-bg-label">画布背景</span>
+            <select id="compose-bg"><option value="white" id="compose-white">白色</option><option value="soft" id="compose-soft">浅灰</option></select>
+          </label>
+          <label class="compose-checkbox"><input type="checkbox" id="compose-labels" checked><span id="compose-labels-label">显示图片编号</span></label>
+          <button type="button" id="compose-swap" class="compose-secondary">交换位置</button>
+        </div>
+        <div id="compose-local-notice" class="compose-local-notice" role="note" hidden>
+          <div class="compose-local-notice-icon" aria-hidden="true">!</div>
+          <div class="compose-local-notice-content">
+            <strong id="compose-local-title">本地下载前，请选择项目中的 img 文件夹</strong>
+            <p id="compose-local-step">打开项目目录，选中 img 文件夹（里面应有 pose 和 costume 两个子目录），不要选单张图片或其他文件夹。</p>
+            <div class="compose-local-path" aria-label="文件夹位置">
+              <span>ai-reference-gallery</span><span aria-hidden="true">/</span><strong>img</strong>
+              <span class="compose-local-subfolders">（包含 pose / costume）</span>
+            </div>
+            <p id="compose-local-public">只在双击本地 index.html 时需要授权；网站正式上线后直接下载，无需授权。</p>
+            <button type="button" class="compose-folder-button" id="compose-folder-button">选择项目 img 文件夹</button>
+          </div>
+        </div>
+        <div class="compose-export">
+          <div class="compose-export-help">
+            <p id="compose-help">原图等比例完整保留，不裁切。所有操作均在浏览器本地完成。</p>
+            <p id="compose-status" aria-live="polite"></p>
+          </div>
+          <button type="button" id="compose-download" disabled>下载 PNG</button>
+        </div>
+        <input type="file" id="compose-folder-input" webkitdirectory directory multiple hidden>
+      </div>
+    </section>
   </main>
-  <footer><span id="footer-note">本站仅提供图库浏览工具；请仅加载你有权使用的素材。</span>
-    <a href="https://ai-pose-gallery.pages.dev/" rel="noopener noreferrer" target="_blank" id="source-link">原始素材来源及使用条款</a>
+  <footer>
+    <div class="footer-content">
+      <p id="footer-note">ai-reference-gallery · 图片与原始数据版权归原作者ギア所有 · 该版本由 vculjp 整理维护</p>
+      <nav class="footer-social-links" id="footer-social-nav" aria-label="社交与项目链接">
+        <a href="https://github.com/vculjp/ai-reference-gallery" rel="noopener noreferrer" target="_blank">GitHub · ai-reference-gallery</a>
+        <a href="https://x.com/uljpVc" rel="noopener noreferrer" target="_blank">X · @uljpVc</a>
+      </nav>
+    </div>
   </footer>
   <div id="overlay" class="overlay" hidden>
     <div class="dialog" role="dialog" aria-modal="true" aria-label="姿势图片预览" id="dialog">
@@ -54,13 +165,17 @@
         <button id="next" type="button" aria-label="下一组">›</button>
       </div>
       <nav id="angles" class="angles"></nav>
-      <div class="dialog-bottom"><span id="position" class="muted"></span><a id="download" download>下载图片</a></div>
+      <div class="dialog-bottom"><span id="position" class="muted"></span>
+        <div class="dialog-actions"><button id="add-to-compose" type="button">加入组合</button><a id="download" download>下载图片</a></div>
+      </div>
       <p class="hint" id="keyboard-hint">← → 切换角度，↑ ↓ 切换姿势，Esc 关闭</p>
     </div>
   </div>
   <script src="catalog.js" defer></script>
   <script src="costume-catalog.js" defer></script>
   <script src="i18n.js" defer></script>
+  <script src="composition.js" defer></script>
+  <script src="composition-ui.js" defer></script>
   <script src="app.js" defer></script>
 </body>
 </html>

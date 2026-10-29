@@ -1,0 +1,112 @@
+/* Composition studio: follows the main gallery's light visual language. */
+.compose-panel { display: grid; gap: 23px; }
+.compose-selection { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.compose-slot, .compose-editor {
+  min-width: 0; padding: 22px; border: 1px solid var(--line);
+  border-radius: 22px; background: #fff; box-shadow: var(--shadow);
+}
+.compose-slot-head { display: flex; justify-content: space-between; gap: 10px; align-items: center;
+  min-height: 27px; margin-bottom: 16px; font-size: 13px; font-weight: 700; }
+.compose-slot-head span:last-child { min-width: 0; color: var(--secondary); font-weight: 500;
+  font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compose-slot-preview { display: flex; justify-content: center; align-items: center; height: 245px;
+  overflow: hidden; border-radius: 15px; background: #f5f6f8; color: var(--tertiary); font-size: 13px; }
+.compose-slot-preview img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.compose-slot-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 15px; }
+.compose-slot > .compose-choose { margin-top: 15px; }
+.compose-choose, .compose-secondary, .compose-folder-button {
+  border: 1px solid #dedfe5; border-radius: 999px; background: #fff; color: var(--ink);
+  padding: 10px 20px; font-size: 12px; font-weight: 650;
+}
+.compose-choose { background: #1d1d1f; color: #fff; border-color: #1d1d1f; }
+.compose-choose:hover { background: #414145; }
+.compose-secondary:hover, .compose-folder-button:hover { background: #f5f6f8; }
+.compose-editor { padding: 27px; }
+.compose-editor-head { display: flex; justify-content: space-between; gap: 12px;
+  align-items: center; margin-bottom: 18px; }
+.compose-editor-head .section-eyebrow { margin-bottom: 5px; }
+.compose-editor-head h3 { margin: 0; font-size: clamp(20px, 2vw, 27px); letter-spacing: -.035em; }
+#compose-size { color: var(--secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.compose-canvas-wrap { display: grid; place-items: center; position: relative;
+  min-height: 280px; padding: 20px; overflow: hidden; border-radius: 16px;
+  background: #f1f2f5; }
+#compose-canvas { display: block; max-width: 100%; max-height: 600px; width: auto;
+  height: auto; object-fit: contain; box-shadow: 0 12px 35px rgb(0 0 0 / 8%); }
+.compose-placeholder { position: absolute; inset: 0; display: grid; place-items: center;
+  padding: 26px; text-align: center; color: var(--tertiary); font-size: 14px; background: #f1f2f5; }
+.compose-tools { display: flex; align-items: end; flex-wrap: wrap; gap: 15px; margin-top: 21px; }
+.compose-tools > label:not(.compose-checkbox) { display: grid; gap: 8px; min-width: 170px;
+  color: var(--secondary); font-size: 12px; font-weight: 600; }
+.compose-tools select { height: 43px; }
+.compose-checkbox { display: flex; align-items: center; gap: 8px; min-height: 43px;
+  font-size: 12px; color: var(--secondary); font-weight: 600; cursor: pointer; }
+.compose-checkbox input { width: 17px; height: 17px; margin: 0; accent-color: var(--accent); }
+.compose-tools .compose-secondary { min-height: 43px; }
+.compose-export { display: flex; justify-content: space-between; align-items: center;
+  gap: 16px; padding-top: 22px; margin-top: 22px; border-top: 1px solid var(--line); }
+.compose-export-help { min-width: 0; }
+.compose-export-help p { margin: 0; color: var(--secondary); font-size: 12px; line-height: 1.7; }
+.compose-export-help #compose-status { font-weight: 650; color: #276e57; }
+.compose-export-help #compose-status[data-status="error"] { color: #b42318; }
+.compose-export-help #compose-status[data-status="error"] {
+  margin-top: 7px; padding: 10px 12px; border: 1px solid #efcac4;
+  border-radius: 10px; background: #fff2f0; font-size: 13px; font-weight: 700;
+}
+.compose-folder-button { margin-top: 10px; font-size: 12px; }
+/* Offline export guidance: visible only for file:// pages without a valid img grant. */
+.compose-local-notice {
+  display: flex; gap: 13px; align-items: flex-start;
+  margin-top: 20px; padding: 17px 19px;
+  border: 1px solid #e8c98d; border-radius: 16px;
+  background: #fffaee; color: #49391e;
+}
+.compose-local-notice-icon {
+  display: grid; place-items: center; flex: none;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: #b87818; color: white; font-size: 16px; font-weight: 800;
+}
+.compose-local-notice-content { min-width: 0; }
+.compose-local-notice-content > strong { display: block; font-size: 14px; font-weight: 750; line-height: 1.5; }
+.compose-local-notice-content p { margin: 8px 0; font-size: 12px; line-height: 1.7; }
+.compose-local-path {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 7px;
+  padding: 9px 12px; border-radius: 9px; background: #fff;
+  border: 1px solid #efdfc4; font-size: 12px; color: #55525a;
+  overflow-wrap: anywhere;
+}
+.compose-local-path strong { color: #a05d06; font-size: 14px; }
+.compose-local-subfolders { color: #77777f; }
+.compose-local-notice .compose-folder-button {
+  margin-top: 7px; background: #1d1d1f; color: white;
+  border-color: #1d1d1f; font-size: 13px; font-weight: 700;
+}
+.compose-local-notice .compose-folder-button:hover { background: #38383b; }
+#compose-download { min-width: 170px; flex-shrink: 0; padding: 13px 23px;
+  border: 0; border-radius: 999px; background: var(--accent); color: #fff; font-weight: 700; }
+#compose-download:disabled { cursor: not-allowed; background: #d3d7e0; color: #777d87; }
+#compose-download:not(:disabled):hover { background: #005bb5; }
+.dialog-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: end; }
+#add-to-compose { min-height: 42px; padding: 10px 17px; border: 1px solid #d5d8df;
+  border-radius: 999px; color: var(--ink); background: #f5f6f8; font-weight: 650; font-size: 13px; }
+#add-to-compose:hover { background: #e9ebf0; }
+@media (max-width: 760px) {
+  .compose-selection { gap: 11px; }
+  .compose-slot, .compose-editor { padding: 14px; border-radius: 18px; }
+  .compose-slot-preview { height: 210px; }
+  .compose-canvas-wrap { padding: 12px; min-height: 180px; }
+  .compose-tools > label:not(.compose-checkbox) { flex: 1 1 120px; min-width: 120px; }
+  .compose-export { align-items: stretch; flex-direction: column; }
+}
+@media (max-width: 480px) {
+  .compose-local-notice { padding: 12px; gap: 10px; }
+  .compose-local-notice-content > strong { font-size: 13px; }
+  .compose-local-path { gap: 5px; }
+  .compose-slot-head { font-size: 11px; align-items: start; flex-direction: column; gap: 3px; }
+  .compose-slot-preview { height: 165px; font-size: 11px; }
+  .compose-choose, .compose-secondary { padding: 9px 13px; }
+  .compose-slot-actions { align-items: stretch; flex-direction: column; }
+  .compose-slot-actions button { width: 100%; }
+  .compose-editor-head { align-items: start; flex-direction: column; }
+  .dialog-bottom { align-items: start; flex-direction: column; }
+  .dialog-actions { width: 100%; justify-content: space-between; }
+}

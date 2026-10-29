@@ -82,6 +82,77 @@ test("both catalogs load offline and the gallery has type switching and paginati
   assert.ok(!app.includes("fetch("));
 });
 
+test("header and footer contain the correct GitHub and X profile links", () => {
+  const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
+  for (const url of [
+    "https://github.com/vculjp/ai-reference-gallery",
+    "https://x.com/uljpVc"
+  ]) {
+    const links = [...html.matchAll(/<a\b[^>]*>/g)].map((match) => match[0])
+      .filter((tag) => tag.includes(`href="${url}"`));
+    assert.equal(links.length, 2, `${url} should appear in header and footer`);
+    for (const tag of links) {
+      assert.match(tag, /target="_blank"/);
+      assert.match(tag, /rel="noopener noreferrer"/);
+    }
+  }
+});
+
+test("footer credits the original creator and maintainer in all three languages", () => {
+  const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
+  assert.match(html, /id="footer-note">ai-reference-gallery · 图片与原始数据版权归原作者ギア所有 · 该版本由 vculjp 整理维护/);
+  assert.ok(!html.includes('id="source-link"'));
+  for (const locale of ["zh-CN", "en", "ja"]) {
+    i18n.setLocale(locale);
+    const notice = i18n.t("footer");
+    for (const token of ["ai-reference-gallery", "ギア", "vculjp"]) {
+      assert.ok(notice.includes(token), `${locale} footer missing ${token}`);
+    }
+  }
+});
+
+test("runtime modules load once, in dependency order, with composition CSS isolated", () => {
+  const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
+  const scripts = [...html.matchAll(/<script src="([^"]+)" defer><\/script>/g)].map((m) => m[1]);
+  assert.deepEqual(scripts, [
+    "catalog.js", "costume-catalog.js", "i18n.js",
+    "composition.js", "composition-ui.js", "app.js"
+  ]);
+  const galleryCSS = fs.readFileSync(path.join(root, "style.css"), "utf8");
+  const composeCSS = fs.readFileSync(path.join(root, "composition.css"), "utf8");
+  assert.ok(!galleryCSS.includes(".compose-panel"), "composition styles should not be duplicated");
+  assert.ok(composeCSS.includes(".compose-panel"));
+  assert.ok(html.includes('href="composition.css"'));
+  const htmlIds = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
+  assert.equal(htmlIds.length, new Set(htmlIds).size, "HTML contains duplicate IDs");
+  const callers = [
+    fs.readFileSync(path.join(root, "app.js"), "utf8"),
+    fs.readFileSync(path.join(root, "composition-ui.js"), "utf8")
+  ];
+  const usedIds = callers.flatMap((source) => [...source.matchAll(/\$\("([^"]+)"\)/g)]
+    .map((match) => match[1]));
+  for (const id of usedIds) assert.ok(htmlIds.includes(id), `Missing HTML control #${id}`);
+});
+
+test("translations have no duplicate keys and all three languages cover the same keys", () => {
+  const source = fs.readFileSync(path.join(root, "i18n.js"), "utf8");
+  const markers = ['"zh-CN": {', "en: {", "ja: {"];
+  const starts = markers.map((marker) => source.indexOf(marker));
+  assert.ok(starts.every((n) => n >= 0));
+  const end = source.indexOf("\n  };", starts[2]);
+  assert.ok(end > starts[2]);
+  const dictionaries = starts.map((start, index) => {
+    const section = source.slice(start, index === 2 ? end : starts[index + 1]);
+    // Several short keys share a line; inspect both line starts and comma-separated keys.
+    const keys = [...section.matchAll(/(?:^ {6}|,\s+)([A-Za-z][\w]*):/gm)].map((m) => m[1]);
+    assert.equal(keys.length, new Set(keys).size, `duplicate i18n key in ${markers[index]}`);
+    return keys.sort();
+  });
+  assert.ok(dictionaries[0].length >= 50);
+  assert.deepEqual(dictionaries[1], dictionaries[0], "English keys differ from Chinese keys");
+  assert.deepEqual(dictionaries[2], dictionaries[0], "Japanese keys differ from Chinese keys");
+});
+
 test("costume labels and keyword searches work in all three languages", () => {
   const sample = costumes.find((item) => item.id === "SPR-0001");
   assert.ok(sample);
@@ -127,11 +198,22 @@ test("every interface text has a Japanese translation", () => {
     "eyebrow", "tagline", "description", "searchLabel", "searchPlaceholder",
     "categoryLabel", "angleLabel", "viewLabel", "viewPose", "viewImage",
     "allCategories", "allAngles", "allSeries", "reset", "loadingCounts",
-    "counts", "results", "angles", "empty", "loadError", "footer", "source",
-    "download", "hint", "close", "previous", "next", "dialog",
-    "typePose", "typeCostume", "costumeDescription", "costumeSearchLabel",
+    "counts", "results", "angles", "empty", "loadError", "footer",
+    "download", "hint", "close", "previous", "next", "dialog", "costumeDialog",
+    "typePose", "typeCostume", "collectionPose", "collectionCostume",
+    "collectionEyebrow", "typeNav", "filterNav", "galleryNav", "pageTitle",
+    "costumeDescription", "costumeSearchLabel",
     "costumeSearchPlaceholder", "costumeName", "costumeResults", "costumeEmpty",
-    "costumeHint", "loadMore"
+    "costumeHint", "loadMore",
+    "collectionCompose", "typeCompose", "composeDescription", "addPose", "addCostume",
+    "composePose", "composeSecond", "composeEmptyPose", "composeEmptySecond",
+    "choosePose", "chooseCostume", "uploadImage", "composeEyebrow", "composePreview",
+    "composeLayout", "composeHorizontal", "composeVertical", "composeBg",
+    "composeWhite", "composeSoft", "composeLabels", "composeSwap", "composeHelp",
+    "composePlaceholder", "composeDownload", "composeFolder", "composeSelectFolder",
+    "composeFolderReady", "composeExporting", "composeSaved", "composeMissingFile",
+    "composeExportError", "composePreviewError", "composeInvalidUpload",
+    "composeLocalTitle", "composeLocalStep", "composeLocalPublic"
   ];
   for (const locale of ["zh-CN", "en", "ja"]) {
     i18n.setLocale(locale);
