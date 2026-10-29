@@ -23,6 +23,11 @@ const composeUI = window.ReferenceCompositionUI({
   chooseCostume: () => switchType("costume"),
   openComposition: () => switchType("compose")
 });
+// BYOK generation (generate-ui.js) reads the live composition through these.
+// Nothing here is sent anywhere; the key itself lives only in generate.js
+// localStorage and is only posted to the baseUrl the user configured.
+window.ReferenceGalleryState = state;
+window.ReferenceGalleryComposeUI = composeUI;
 function groupImages(records) {
   const result = new Map();
   for (const img of records) {

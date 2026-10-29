@@ -1,0 +1,20 @@
+/* BYOK generation panels: reuse the compose workbench look, solid colours only. */
+.gen-panel { margin-top: 24px; padding: 20px; background: #f7f8fa; border: 1px solid #e5e7eb; border-radius: 12px; }
+.gen-panel h3 { margin: 0 0 6px; }
+.gen-panel .muted { color: #6b7280; font-size: 14px; }
+.gen-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 14px 0; }
+.gen-form label { display: grid; gap: 6px; font-size: 14px; }
+.gen-form input, .gen-form select, .gen-form textarea { padding: 9px 10px; border: 1px solid #d1d5db; border-radius: 8px; background: #ffffff; font: inherit; }
+.gen-form input:disabled { background: #eef0f3; color: #6b7280; }
+.gen-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 12px 0; }
+.gen-actions button, .my-costume-card button { padding: 9px 16px; border: 0; border-radius: 8px; background: #22344a; color: #fff; cursor: pointer; font: inherit; }
+.gen-actions button:disabled { opacity: .55; cursor: wait; }
+.gen-actions button.compose-secondary, .my-costume-card button.compose-secondary { background: #eef0f3; color: #22344a; }
+.gen-status { min-height: 20px; font-size: 14px; }
+.gen-status[data-status="error"] { color: #b91c1c; }
+.gen-result { margin-top: 14px; }
+.gen-result img, .my-costume-card img { width: 100%; max-width: 640px; display: block; border-radius: 10px; background: #fff; }
+.my-costume-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; margin-top: 12px; }
+.my-costume-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px; display: grid; gap: 8px; }
+.my-costume-card p { margin: 0; font-size: 13px; word-break: break-all; }
+.gen-divider { border: 0; border-top: 1px solid #e5e7eb; margin: 22px 0; }

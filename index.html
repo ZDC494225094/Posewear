@@ -8,6 +8,7 @@
   <title>Reference Gallery — AI 创作参考素材库</title>
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="composition.css">
+  <link rel="stylesheet" href="generate.css">
 </head>
 <body>
   <header class="site-header">
@@ -161,6 +162,95 @@
           </div>
           <input type="file" id="compose-person-input" accept="image/png,image/jpeg,image/webp" hidden>
         </div>
+        <section class="gen-panel" id="gen-panel" aria-label="AI 生成（自带 Key）">
+          <h3>AI 生成 · 自带 Key（BYOK）</h3>
+          <p class="muted">先选好姿势和服装，再点生成。成图调用的是你下面填的渠道，Key 只保存在本浏览器 localStorage，不会上传到仓库，也不会发给除该渠道外的任何地方。共用电脑请用完点“清除配置”。</p>
+          <details open>
+            <summary>生图渠道配置（可改，不写死任何一家）</summary>
+            <div class="gen-form">
+              <label>渠道预设
+                <select id="gen-preset">
+                  <option value="moosecloud">moosecloud.cc</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="custom">自定义</option>
+                </select>
+              </label>
+              <label>Base URL
+                <input id="gen-base-url" type="url" placeholder="https://moosecloud.cc" autocomplete="off">
+              </label>
+              <label>API Key
+                <input id="gen-api-key" type="password" placeholder="sk-…" autocomplete="off">
+              </label>
+              <label>模型
+                <input id="gen-model" type="text" value="gpt-image-2" autocomplete="off">
+              </label>
+              <label>尺寸
+                <select id="gen-size">
+                  <option value="1024x1024">1024 × 1024</option>
+                  <option value="1024x1536">1024 × 1536（竖）</option>
+                  <option value="1536x1024">1536 × 1024（横）</option>
+                  <option value="auto">auto（渠道默认）</option>
+                </select>
+              </label>
+            </div>
+            <div class="gen-actions">
+              <button type="button" id="gen-save">保存配置到本浏览器</button>
+              <button type="button" class="compose-secondary" id="gen-clear">清除配置</button>
+            </div>
+          </details>
+          <div class="gen-form">
+            <label>成图补充要求（可选）
+              <textarea id="gen-extra" rows="2" placeholder="例如：户外街景、自然光、不要改服装颜色"></textarea>
+            </label>
+          </div>
+          <div class="gen-actions">
+            <button type="button" id="gen-final">用当前姿势 + 服装生成成图</button>
+          </div>
+          <p id="gen-status" class="gen-status" aria-live="polite"></p>
+          <div class="gen-result" id="gen-result" hidden>
+            <img id="gen-result-img" alt="AI 生成的成图" hidden>
+            <div class="gen-actions"><button type="button" id="gen-download">下载成图 PNG</button></div>
+          </div>
+          <p class="muted">调用时传的是姿势、服装、人物三张原图（不是拼好的参考板），这样拼板边框和编号不会干扰模型。file:// 打开时图库原图读不到，请用本地 HTTP 服务打开（见 BYOK.md），或上传自定义图片。</p>
+          <hr class="gen-divider">
+          <h3>服装生成 · 含男装</h3>
+          <p class="muted">原图库 1407 套按分类看基本是女装（春/夏/秋/冬/内衣/性感/泳装/派对，无男装分类）。这里不硬塞原图库图片：用上面配置的渠道现生成，生成的服装只存在你本浏览器的“我的服装”里，可直接用作组合服装。</p>
+          <div class="gen-form">
+            <label>性别
+              <select id="costume-gender">
+                <option value="男装">男装</option>
+                <option value="女装">女装</option>
+                <option value="中性">中性</option>
+              </select>
+            </label>
+            <label>风格
+              <select id="costume-style"></select>
+            </label>
+            <label>呈现方式
+              <select id="costume-presentation">
+                <option value="model">模特全身穿着</option>
+                <option value="flat">平铺展示</option>
+                <option value="hanger">衣架展示</option>
+              </select>
+            </label>
+            <label>服装细节（可选）
+              <textarea id="costume-details" rows="2" placeholder="例如：深灰羊毛西装、细条纹、配白衬衫和黑皮鞋"></textarea>
+            </label>
+          </div>
+          <div class="gen-actions">
+            <button type="button" id="gen-costume">生成服装</button>
+          </div>
+          <p id="costume-gen-status" class="gen-status" aria-live="polite"></p>
+          <div class="gen-result" id="costume-result" hidden>
+            <img id="costume-result-img" alt="AI 生成的服装" hidden>
+            <div class="gen-actions">
+              <button type="button" id="costume-use">用作组合服装</button>
+              <button type="button" class="compose-secondary" id="costume-download">下载服装 PNG</button>
+            </div>
+          </div>
+          <h4>我的服装（仅本浏览器）</h4>
+          <div class="my-costume-grid" id="my-costume-grid"></div>
+        </section>
         <div id="compose-local-notice" class="compose-local-notice" role="note" hidden>
           <div class="compose-local-notice-icon" aria-hidden="true">!</div>
           <div class="compose-local-notice-content">
@@ -243,5 +333,7 @@
   <script src="composition.js" defer></script>
   <script src="composition-ui.js" defer></script>
   <script src="app.js" defer></script>
+  <script src="generate.js" defer></script>
+  <script src="generate-ui.js" defer></script>
 </body>
 </html>
