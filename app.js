@@ -7,7 +7,7 @@ const state = {
   type: "pose", poseImages: [], costumeImages: [], images: [], records: [], cards: [],
   series: "", category: "", angle: "", search: "", view: "pose",
   visibleCount: 60, current: -1, selected: null,
-  composition: { pose: null, second: null, layout: "horizontal", background: "white", labels: true, swapped: false }
+  composition: { pose: null, second: null, person: null, background: "white", labels: true }
 };
 function uniq(arr) { return [...new Set(arr)]; }
 function element(tag, className, text) {
@@ -17,7 +17,7 @@ function element(tag, className, text) {
   return e;
 }
 const composeUI = window.ReferenceCompositionUI({
-  state, t, $, element,
+  state, t, label, $, element,
   composition: window.ReferenceComposition,
   choosePose: () => switchType("pose"),
   chooseCostume: () => switchType("costume"),
@@ -220,21 +220,7 @@ function refreshStaticText() {
   $("prev").setAttribute("aria-label", t("previous"));
   $("next").setAttribute("aria-label", t("next"));
   $("add-to-compose").textContent = t(state.type === "costume" ? "addCostume" : "addPose");
-  for (const [id, key] of Object.entries({
-    "compose-pose-label": "composePose", "compose-costume-label": "composeSecond",
-    "compose-pose-empty": "composeEmptyPose", "compose-costume-empty": "composeEmptySecond",
-    "compose-choose-pose": "choosePose", "compose-choose-costume": "chooseCostume",
-    "compose-upload": "uploadImage", "compose-preview-eyebrow": "composeEyebrow",
-    "compose-preview-title": "composePreview", "compose-layout-label": "composeLayout",
-    "compose-horizontal": "composeHorizontal", "compose-vertical": "composeVertical",
-    "compose-bg-label": "composeBg", "compose-white": "composeWhite",
-    "compose-soft": "composeSoft", "compose-labels-label": "composeLabels",
-    "compose-swap": "composeSwap", "compose-help": "composeHelp",
-    "compose-download": "composeDownload", "compose-folder-button": "composeFolder",
-    "compose-local-title": "composeLocalTitle", "compose-local-step": "composeLocalStep",
-    "compose-local-public": "composeLocalPublic"
-  })) $(id).textContent = t(key);
-  if (!state.composition.pose || !state.composition.second) $("compose-placeholder").textContent = t("composePlaceholder");
+  composeUI.refreshLabels();
   $("lang-zh").setAttribute("aria-pressed", i18n.locale === "zh-CN" ? "true" : "false");
   $("lang-en").setAttribute("aria-pressed", i18n.locale === "en" ? "true" : "false");
   $("lang-ja").setAttribute("aria-pressed", i18n.locale === "ja" ? "true" : "false");
@@ -278,6 +264,7 @@ function resetFilters() {
 }
 function switchType(type) {
   if (state.type === type) return;
+  composeUI.closePreview();
   if (!$("overlay").hidden) closeImage();
   state.type = type;
   $("browser-panel").hidden = type === "compose";

@@ -25,6 +25,15 @@ const records = catalogContext.window.POSE_GALLERY_CATALOG;
 vm.runInNewContext(fs.readFileSync(path.join(root, "costume-catalog.js"), "utf8"), catalogContext);
 const costumes = catalogContext.window.COSTUME_GALLERY_CATALOG;
 
+test("project root contains no empty files accidentally created by shell commands", () => {
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isFile() || entry.name.startsWith(".")) continue;
+    const filename = path.join(root, entry.name);
+    assert.ok(fs.statSync(filename).size > 0,
+      `Unexpected empty file in project root: ${entry.name}`);
+  }
+});
+
 test("offline catalog loads without fetch and all local image files are present", () => {
   assert.equal(records.length, 1439);
   assert.equal(new Set(records.map((item) => item.pose_key)).size, 288);
@@ -86,7 +95,7 @@ test("header and footer contain the correct GitHub and X profile links", () => {
   const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
   for (const url of [
     "https://github.com/vculjp/ai-reference-gallery",
-    "https://x.com/uljpVc"
+    "https://x.com/vculjp"
   ]) {
     const links = [...html.matchAll(/<a\b[^>]*>/g)].map((match) => match[0])
       .filter((tag) => tag.includes(`href="${url}"`));
@@ -96,6 +105,41 @@ test("header and footer contain the correct GitHub and X profile links", () => {
       assert.match(tag, /rel="noopener noreferrer"/);
     }
   }
+});
+
+test("composition provides controlled random draws and copying without new dependencies", () => {
+  const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
+  const controller = fs.readFileSync(path.join(root, "composition-ui.js"), "utf8");
+  for (const id of ["compose-random-pair", "compose-random-pose", "compose-random-costume"]) {
+    assert.ok(html.includes(`id="${id}"`));
+    assert.ok(controller.includes(`$("${id}").onclick`));
+  }
+  for (const id of [
+    "compose-random-outfit-filter", "compose-random-pose-filter", "compose-random-include-duo",
+    "compose-prompt-text", "compose-copy-prompt", "compose-copy-image"
+  ]) assert.ok(html.includes(`id="${id}"`), `missing ${id}`);
+  assert.ok(controller.includes("state.poseImages"));
+  assert.ok(controller.includes("state.costumeImages"));
+  assert.ok(controller.includes("getPoseGroups()"));
+  assert.ok(controller.includes("composition.exportPNG(compositionOptions())"));
+});
+
+test("composition uses fixed order and only actual gallery IDs", () => {
+  const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
+  const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
+  const composer = fs.readFileSync(path.join(root, "composition.js"), "utf8");
+  const controller = fs.readFileSync(path.join(root, "composition-ui.js"), "utf8");
+  for (const obsolete of ["compose-layout", "compose-horizontal", "compose-vertical", "compose-swap"]) {
+    assert.ok(!html.includes(`id="${obsolete}"`), `Obsolete control: ${obsolete}`);
+    assert.ok(!controller.includes(`$("${obsolete}")`), `Obsolete handler: ${obsolete}`);
+  }
+  assert.ok(!app.includes('layout: "horizontal"'));
+  assert.ok(!app.includes("swapped:"));
+  assert.ok(!composer.includes("options.swapped"));
+  assert.ok(!composer.includes("options.layout"));
+  assert.match(composer, /options\.labels && !entry\.uploadUrl && entry\.id/);
+  assert.ok(!composer.includes('"PERSON"'), "Uploads must not be printed as fake gallery IDs");
+  assert.ok(!composer.includes('"UPLOAD"'));
 });
 
 test("footer credits the original creator and maintainer in all three languages", () => {
@@ -132,6 +176,19 @@ test("runtime modules load once, in dependency order, with composition CSS isola
   const usedIds = callers.flatMap((source) => [...source.matchAll(/\$\("([^"]+)"\)/g)]
     .map((match) => match[1]));
   for (const id of usedIds) assert.ok(htmlIds.includes(id), `Missing HTML control #${id}`);
+});
+
+test("composition UI owns its translations and obsolete inline preview keys are removed", () => {
+  const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
+  const composer = fs.readFileSync(path.join(root, "composition-ui.js"), "utf8");
+  const source = fs.readFileSync(path.join(root, "i18n.js"), "utf8");
+  assert.match(app, /composeUI\.refreshLabels\(\)/);
+  assert.match(composer, /function refreshLabels\(/);
+  assert.ok(!app.includes('"compose-pose-label":'), "Composition labels should live in composition-ui.js");
+  for (const key of ["composeEyebrow", "composePlaceholder"]) {
+    assert.ok(!source.includes(`${key}:`), `Obsolete translation key ${key} is still defined`);
+  }
+  assert.ok(!source.includes("composePreview:"), "Old always-visible preview label should be gone");
 });
 
 test("translations have no duplicate keys and all three languages cover the same keys", () => {
@@ -207,13 +264,24 @@ test("every interface text has a Japanese translation", () => {
     "costumeHint", "loadMore",
     "collectionCompose", "typeCompose", "composeDescription", "addPose", "addCostume",
     "composePose", "composeSecond", "composeEmptyPose", "composeEmptySecond",
-    "choosePose", "chooseCostume", "uploadImage", "composeEyebrow", "composePreview",
-    "composeLayout", "composeHorizontal", "composeVertical", "composeBg",
-    "composeWhite", "composeSoft", "composeLabels", "composeSwap", "composeHelp",
-    "composePlaceholder", "composeDownload", "composeFolder", "composeSelectFolder",
+    "composePerson", "composePersonEmpty", "composePersonHelp", "composeUploadPerson",
+    "composeRemovePerson", "composePreviewHintThree",
+    "composeRandomTitle", "composeRandomHint", "composeRandomPair",
+    "composeRandomPose", "composeRandomCostume",
+    "composeOutfitFilter", "composePoseFilter", "composeAllOutfits",
+    "composePreviewCopy",
+    "composeAdaptiveSize",
+    "composeAllPoses", "composeSoloPoses", "composeIncludeDuo",
+    "composeRandomRange", "composePromptTitle", "composePromptHelp", "composePromptEmpty",
+    "composeCopyPrompt", "composeCopyImage", "composeCopiedPrompt", "composeCopiedImage",
+    "composeCopyError", "composeCopyImageError", "composePosLeft", "composePosRight",
+    "composePosMiddleHorizontal", "composePoseMeta", "composePrompt", "composePromptThree",
+    "choosePose", "chooseCostume", "uploadImage",
+    "composeBg", "composeWhite", "composeSoft", "composeLabels", "composeHelp",
+    "composeDownload", "composeFolder", "composeSelectFolder",
     "composeFolderReady", "composeExporting", "composeSaved", "composeMissingFile",
     "composeExportError", "composePreviewError", "composeInvalidUpload",
-    "composeLocalTitle", "composeLocalStep", "composeLocalPublic"
+    "composeLocalTitle", "composeLocalStep"
   ];
   for (const locale of ["zh-CN", "en", "ja"]) {
     i18n.setLocale(locale);
@@ -222,6 +290,19 @@ test("every interface text has a Japanese translation", () => {
       assert.equal(typeof value, "string", `${locale}.${key}`);
       assert.ok(value.trim(), `${locale}.${key}`);
     }
+  }
+});
+
+test("all three languages distinguish pose, outfit and person reference prompts", () => {
+  for (const locale of ["zh-CN", "en", "ja"]) {
+    i18n.setLocale(locale);
+    const prompt = i18n.t("composePromptThree", "POSE-01",
+      i18n.t("composePosLeft"), "OUTFIT-02",
+      i18n.t("composePosMiddleHorizontal"), i18n.t("composePosRight"));
+    assert.match(prompt, /POSE-01/);
+    assert.match(prompt, /OUTFIT-02/);
+    assert.ok(prompt.includes(i18n.t("composePosMiddleHorizontal")));
+    assert.ok(prompt.includes(i18n.t("composePosRight")));
   }
 });
 

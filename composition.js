@@ -1,10 +1,11 @@
 "use strict";
-// Offline-capable two-image compositor. No dependencies, network APIs, or server.
+// Offline-capable two/three-image reference compositor. No dependencies, network APIs, or server.
 window.ReferenceComposition = (() => {
   let directory = null;
   let pickedFiles = null;
-  const previewSize = { horizontal: [1200, 800], vertical: [800, 1200] };
-  const exportSize = { horizontal: [2400, 1600], vertical: [1600, 2400] };
+  // Fixed order: pose, outfit and optional person. Canvas adapts to source
+  // ratios rather than forcing portrait references into a 3:2 rectangle.
+  const previewSize = [1200, 800];
 
   function setFiles(files) {
     const selected = new Map();
@@ -82,8 +83,13 @@ window.ReferenceComposition = (() => {
   }
 
   async function loadSource(entry, original) {
-    const path = sourceFor(entry, original);
-    if (!original || entry.uploadUrl || location.protocol !== "file:") return { image: await loadImage(path) };
+    // Render original-resolution images for the on-demand large preview when
+    // available. In file:// mode, keep preview possible without authorization.
+    const highResolution = original || location.protocol !== "file:" || !needsFolder();
+    const path = sourceFor(entry, highResolution);
+    if (!highResolution || entry.uploadUrl || location.protocol !== "file:") {
+      return { image: await loadImage(path) };
+    }
     const blob = await fileFor(path);
     const url = URL.createObjectURL(blob);
     try { return { image: await loadImage(url), url }; }
@@ -98,35 +104,53 @@ window.ReferenceComposition = (() => {
   }
 
   function paint(canvas, options, images, original) {
-    const vertical = options.layout === "vertical";
-    const [w, h] = (original ? exportSize : previewSize)[vertical ? "vertical" : "horizontal"];
+    const entries = [options.pose, options.second];
+    if (options.person) entries.push(options.person);
+    const loaded = images;
+    const padding = 14, margin = 24, gap = 26;
+    // Only catalog assets have image IDs. Uploaded filenames and the former
+    // hard-coded PERSON text are not catalog numbers and must not be printed.
+    const codes = entries.map((entry) =>
+      options.labels && !entry.uploadUrl && entry.id ? String(entry.id) : "");
+    const labelHeights = codes.map((code) => code ? 64 : 0);
+    const unit = 1000;
+    const ratios = loaded.map((image) => image.naturalWidth / image.naturalHeight);
+    const boxWidths = ratios.map((ratio) => unit * ratio + 2 * padding);
+    const boxHeights = labelHeights.map((height) => unit + 2 * padding + height);
+    const rawW = boxWidths.reduce((sum, width) => sum + width, 0) +
+      gap * (loaded.length - 1) + 2 * margin;
+    const rawH = Math.max(...boxHeights) + 2 * margin;
+    const [maxW, maxH] = previewSize;
+    const scale = Math.min(maxW / rawW, maxH / rawH);
+    // Render at exactly twice the preview resolution for matching image ratios.
+    // Preview and export are generated from the same layout geometry.
+    const multiplier = original ? 2 : 1;
+    const w = Math.round(rawW * scale) * multiplier;
+    const h = Math.round(rawH * scale) * multiplier;
     canvas.width = w; canvas.height = h;
     const ctx = canvas.getContext("2d");
     ctx.fillStyle = options.background === "soft" ? "#f2f3f6" : "#ffffff";
     ctx.fillRect(0, 0, w, h);
-    const margin = Math.round(w * (vertical ? .058 : .038));
-    const gap = Math.round(w * (vertical ? .027 : .025));
-    const labelH = options.labels ? Math.round(w * (vertical ? .047 : .030)) : 0;
-    const cols = vertical ? 1 : 2, rows = vertical ? 2 : 1;
-    const pw = (w - 2 * margin - (cols - 1) * gap) / cols;
-    const ph = (h - 2 * margin - (rows - 1) * gap) / rows;
-    const entries = options.swapped ? [options.second, options.pose] : [options.pose, options.second];
-    const loaded = options.swapped ? [images[1], images[0]] : images;
-    for (let i = 0; i < 2; i++) {
-      const x = margin + (vertical ? 0 : i * (pw + gap));
-      const y = margin + (vertical ? i * (ph + gap) : 0);
+    ctx.scale(scale * multiplier, scale * multiplier);
+    let offset = 0;
+    for (let i = 0; i < loaded.length; i++) {
+      const pw = boxWidths[i], ph = boxHeights[i];
+      const x = margin + offset;
+      const y = margin;
       ctx.fillStyle = options.background === "soft" ? "#ffffff" : "#f7f8fa";
       ctx.fillRect(x, y, pw, ph);
-      const padding = Math.max(12, Math.round(w * .012));
       contain(ctx, loaded[i], x + padding, y + padding, pw - padding * 2,
-        ph - padding * 2 - labelH);
-      if (options.labels) {
-        const id = entries[i].id || "UPLOAD";
-        ctx.fillStyle = "#525866";
-        ctx.font = `600 ${Math.max(14, Math.round(w * .012))}px system-ui, sans-serif`;
+        ph - padding * 2 - labelHeights[i]);
+      if (codes[i]) {
+        ctx.fillStyle = "#333d4e";
+        // Larger than the previous 19 virtual pixels: readable in both
+        // half-size popup previews and full-resolution PNG exports.
+        ctx.font = "650 35px system-ui, sans-serif";
         ctx.textBaseline = "middle";
-        ctx.fillText(id.slice(0, 50), x + padding, y + ph - labelH / 2, pw - padding * 2);
+        ctx.fillText(codes[i].slice(0, 40), x + padding,
+          y + ph - labelHeights[i] / 2, pw - padding * 2);
       }
+      offset += pw + gap;
     }
     return [w, h];
   }
@@ -137,6 +161,7 @@ window.ReferenceComposition = (() => {
     try {
       sources.push(await loadSource(options.pose, original));
       sources.push(await loadSource(options.second, original));
+      if (options.person) sources.push(await loadSource(options.person, original));
       return paint(canvas, options, sources.map((s) => s.image), original);
     }
     finally { for (const source of sources) if (source.url) URL.revokeObjectURL(source.url); }

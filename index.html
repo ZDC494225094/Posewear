@@ -24,9 +24,9 @@
             </svg>
             <span>GitHub</span>
           </a>
-          <a class="social-link" href="https://x.com/uljpVc" target="_blank" rel="noopener noreferrer" id="x-link" aria-label="X · @uljpVc">
+          <a class="social-link" href="https://x.com/vculjp" target="_blank" rel="noopener noreferrer" id="x-link" aria-label="X · @vculjp">
             <span class="social-x-icon" aria-hidden="true">𝕏</span>
-            <span>@uljpVc</span>
+            <span>@vculjp</span>
           </a>
         </nav>
         <div class="language-switch" role="group" aria-label="Language / 语言 / 言語">
@@ -85,17 +85,50 @@
     <div class="load-more-wrap"><button id="load-more" type="button" hidden>加载更多</button></div>
     </div>
     <section id="compose-panel" class="compose-panel" hidden aria-label="组合工作台">
+      <div class="compose-random-bar">
+        <div class="compose-random-copy">
+          <strong id="compose-random-title">试试随机搭配</strong>
+          <p id="compose-random-hint">从全部姿势和服装素材中随机抽取，立即生成新组合。</p>
+        </div>
+        <button type="button" id="compose-random-pair" class="compose-random-primary">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="m18 14 4 4-4 4"></path><path d="m18 2 4 4-4 4"></path>
+            <path d="M2 18h2.5c5 0 6.5-12 12-12H22"></path><path d="M2 6h2.5c2.2 0 3.6 2.3 4.9 4.9"></path><path d="M14.6 16.5c.6 1 1.2 1.5 1.9 1.5H22"></path>
+          </svg>
+          <span id="compose-random-pair-label">一键随机组合</span>
+        </button>
+      </div>
+      <div class="compose-random-filters" aria-label="随机抽取范围" id="compose-random-filters">
+        <label><span id="compose-random-outfit-filter-label">服装分类</span>
+          <select id="compose-random-outfit-filter"><option value="">全部服装</option></select>
+        </label>
+        <label><span id="compose-random-pose-filter-label">姿势分类</span>
+          <select id="compose-random-pose-filter"><option value="">全部单人姿势</option></select>
+        </label>
+        <label class="compose-random-duo-option">
+          <input type="checkbox" id="compose-random-include-duo">
+          <span id="compose-random-duo-label">包含双人姿势</span>
+        </label>
+        <span id="compose-random-pool-size" class="compose-random-pool-size" aria-live="polite"></span>
+      </div>
+      <div class="compose-workbench">
       <div class="compose-selection">
         <article class="compose-slot">
           <div class="compose-slot-head"><span id="compose-pose-label">01 · 姿势</span><span id="compose-pose-id"></span></div>
           <div class="compose-slot-preview" id="compose-pose-preview"><span id="compose-pose-empty">尚未选择姿势</span></div>
-          <button type="button" class="compose-choose" id="compose-choose-pose">选择姿势</button>
+          <p class="compose-drawn-meta" id="compose-pose-meta"></p>
+          <div class="compose-slot-actions">
+            <button type="button" class="compose-choose" id="compose-choose-pose">选择姿势</button>
+            <button type="button" class="compose-secondary" id="compose-random-pose">随机姿势</button>
+          </div>
         </article>
         <article class="compose-slot">
           <div class="compose-slot-head"><span id="compose-costume-label">02 · 服装或图片</span><span id="compose-costume-id"></span></div>
           <div class="compose-slot-preview" id="compose-costume-preview"><span id="compose-costume-empty">尚未选择图片</span></div>
+          <p class="compose-drawn-meta" id="compose-costume-meta"></p>
           <div class="compose-slot-actions">
             <button type="button" class="compose-choose" id="compose-choose-costume">选择服装</button>
+            <button type="button" class="compose-secondary" id="compose-random-costume">随机服装</button>
             <button type="button" class="compose-secondary" id="compose-upload">上传图片</button>
           </div>
           <input type="file" id="compose-upload-input" accept="image/png,image/jpeg,image/webp" hidden>
@@ -103,53 +136,86 @@
       </div>
       <div class="compose-editor">
         <div class="compose-editor-head">
-          <div><p class="section-eyebrow" id="compose-preview-eyebrow">LIVE PREVIEW</p><h3 id="compose-preview-title">组合预览</h3></div>
-          <span id="compose-size">2400 × 1600 PNG</span>
+          <div class="compose-editor-heading">
+            <p class="section-eyebrow" id="compose-preview-eyebrow">COMPOSITION</p>
+            <h3 id="compose-preview-title">组合设置</h3>
+            <span id="compose-size">2400 × 1600 PNG</span>
+          </div>
+          <div class="compose-primary-actions">
+            <button id="compose-open-preview" type="button" class="compose-preview-button" disabled>大图预览</button>
+            <button id="compose-copy-image" type="button" class="compose-secondary" disabled>复制组合图片</button>
+            <button type="button" id="compose-download" disabled>下载 PNG</button>
+          </div>
         </div>
-        <div class="compose-canvas-wrap">
-          <canvas id="compose-canvas" width="1200" height="800" aria-label="组合预览"></canvas>
-          <div class="compose-placeholder" id="compose-placeholder">选择姿势和第二张图片后即可预览</div>
-        </div>
-        <div class="compose-tools">
-          <label><span id="compose-layout-label">排列方式</span>
-            <select id="compose-layout"><option value="horizontal" id="compose-horizontal">左右拼图</option><option value="vertical" id="compose-vertical">上下拼图</option></select>
-          </label>
-          <label><span id="compose-bg-label">画布背景</span>
-            <select id="compose-bg"><option value="white" id="compose-white">白色</option><option value="soft" id="compose-soft">浅灰</option></select>
-          </label>
-          <label class="compose-checkbox"><input type="checkbox" id="compose-labels" checked><span id="compose-labels-label">显示图片编号</span></label>
-          <button type="button" id="compose-swap" class="compose-secondary">交换位置</button>
+        <p id="compose-status" class="compose-top-status" aria-live="polite"></p>
+        <p id="compose-copy-status" class="compose-top-status" aria-live="polite"></p>
+        <div class="compose-person-slot" role="group" aria-labelledby="compose-person-label">
+          <div class="compose-person-thumb" id="compose-person-preview"><span id="compose-person-empty">可选的人物参考</span></div>
+          <div class="compose-person-info">
+            <div class="compose-person-heading"><strong id="compose-person-label">人物参考（可选）</strong><span id="compose-person-id"></span></div>
+            <p id="compose-person-help">上传人物照片，帮助 AI 参考面部和人物特征；图片只在本地处理。</p>
+          </div>
+          <div class="compose-person-actions">
+            <button type="button" class="compose-choose" id="compose-upload-person">上传人物照片</button>
+            <button type="button" class="compose-secondary" id="compose-remove-person" hidden>移除</button>
+          </div>
+          <input type="file" id="compose-person-input" accept="image/png,image/jpeg,image/webp" hidden>
         </div>
         <div id="compose-local-notice" class="compose-local-notice" role="note" hidden>
           <div class="compose-local-notice-icon" aria-hidden="true">!</div>
           <div class="compose-local-notice-content">
-            <strong id="compose-local-title">本地下载前，请选择项目中的 img 文件夹</strong>
-            <p id="compose-local-step">打开项目目录，选中 img 文件夹（里面应有 pose 和 costume 两个子目录），不要选单张图片或其他文件夹。</p>
-            <div class="compose-local-path" aria-label="文件夹位置">
-              <span>ai-reference-gallery</span><span aria-hidden="true">/</span><strong>img</strong>
-              <span class="compose-local-subfolders">（包含 pose / costume）</span>
-            </div>
-            <p id="compose-local-public">只在双击本地 index.html 时需要授权；网站正式上线后直接下载，无需授权。</p>
-            <button type="button" class="compose-folder-button" id="compose-folder-button">选择项目 img 文件夹</button>
+            <strong id="compose-local-title">本地下载或复制组合图片均需授权</strong>
+            <p id="compose-local-step">请选择本项目的 img 文件夹（包含 pose / costume）；线上使用无需授权。</p>
           </div>
+          <button type="button" class="compose-folder-button" id="compose-folder-button">选择 img 文件夹</button>
         </div>
-        <div class="compose-export">
-          <div class="compose-export-help">
-            <p id="compose-help">原图等比例完整保留，不裁切。所有操作均在浏览器本地完成。</p>
-            <p id="compose-status" aria-live="polite"></p>
+        <div class="compose-tools">
+          <label><span id="compose-bg-label">画布背景</span>
+            <select id="compose-bg"><option value="white" id="compose-white">白色</option><option value="soft" id="compose-soft">浅灰</option></select>
+          </label>
+          <label class="compose-checkbox"><input type="checkbox" id="compose-labels" checked><span id="compose-labels-label">显示图片编号</span></label>
+        </div>
+        <details class="compose-prompt-box" id="compose-prompt-box">
+          <summary id="compose-prompt-title">AI 创作提示词</summary>
+          <p id="compose-prompt-help">复制组合图与提示词，可配合自己的角色脸部参考图使用。</p>
+          <textarea id="compose-prompt-text" rows="7" readonly aria-label="AI 创作提示词"></textarea>
+          <div class="compose-prompt-actions">
+            <button id="compose-copy-prompt" type="button" class="compose-secondary" disabled>复制提示词</button>
           </div>
-          <button type="button" id="compose-download" disabled>下载 PNG</button>
-        </div>
+        </details>
+        <p id="compose-help" class="compose-bottom-help">原图等比例完整保留，不裁切。所有操作均在浏览器本地完成。</p>
         <input type="file" id="compose-folder-input" webkitdirectory directory multiple hidden>
+      </div>
       </div>
     </section>
   </main>
+  <div id="compose-preview-overlay" class="compose-preview-overlay" hidden>
+    <div class="compose-preview-dialog" id="compose-preview-dialog" role="dialog" aria-modal="true" aria-labelledby="compose-preview-dialog-title" tabindex="-1">
+      <div class="compose-preview-dialog-head">
+        <div class="compose-preview-dialog-heading">
+          <h2 id="compose-preview-dialog-title">组合大图预览</h2>
+          <span id="compose-preview-size">自适应高清 PNG</span>
+        </div>
+        <div class="compose-preview-dialog-actions">
+          <button type="button" id="compose-preview-copy" class="compose-secondary">复制图片</button>
+          <button type="button" id="compose-preview-download">下载 PNG</button>
+        </div>
+        <button type="button" id="compose-preview-close" class="compose-preview-close" aria-label="关闭预览">×</button>
+      </div>
+      <div class="compose-preview-stage" id="compose-preview-stage">
+        <canvas id="compose-canvas" width="1200" height="800" aria-label="姿势、服装与可选人物参考组合预览"></canvas>
+        <div class="compose-placeholder" id="compose-placeholder">选择姿势和第二张图片后即可预览</div>
+      </div>
+      <p id="compose-preview-hint" class="compose-preview-hint">完整显示两张图片，不裁切。按 Esc 关闭预览。</p>
+      <p id="compose-preview-action-status" class="compose-preview-action-status" aria-live="polite"></p>
+    </div>
+  </div>
   <footer>
     <div class="footer-content">
       <p id="footer-note">ai-reference-gallery · 图片与原始数据版权归原作者ギア所有 · 该版本由 vculjp 整理维护</p>
       <nav class="footer-social-links" id="footer-social-nav" aria-label="社交与项目链接">
         <a href="https://github.com/vculjp/ai-reference-gallery" rel="noopener noreferrer" target="_blank">GitHub · ai-reference-gallery</a>
-        <a href="https://x.com/uljpVc" rel="noopener noreferrer" target="_blank">X · @uljpVc</a>
+        <a href="https://x.com/vculjp" rel="noopener noreferrer" target="_blank">X · @vculjp</a>
       </nav>
     </div>
   </footer>

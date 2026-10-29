@@ -1,66 +1,80 @@
-# AI Reference Gallery · AI 姿势与服装参考图库
+# AI Reference Gallery
 
-> 收录 **288 组 / 1,439 张姿势参考图**与 **1,407 套服装参考素材**，支持中文 / English / 日本語，纯静态、零依赖、可离线使用。
+**把姿势、服装和人物照片组合成一张 AI 创作参考图。**
 
-![姿势图库桌面端预览](docs/preview.jpg)
+一个纯静态、可离线使用的参考图组合工作台。挑选素材或一键随机搭配，制作双图 / 三图参考板，配合自动生成的提示词交给支持图片参考的 AI 工具使用。
 
-## 效果预览
+![组合制作工作台：姿势、服装、组合设置三栏布局](docs/compose.jpg)
+
+## 核心功能：组合制作
+
+桌面端采用 **姿势｜服装｜组合设置** 三栏等宽布局，移动端自动调整排版。人物参考上传入口放在「组合设置」内，无需跳转页面。
+
+| 姿势参考 | 服装参考 | 组合设置 |
+| --- | --- | --- |
+| 从图库选择姿势，或随机抽取 | 从图库选择服装、随机抽取，或上传自己的图片 | 上传可选人物照片，设置背景、预览、复制与导出 |
+
+### 双图 / 三图参考板
+
+- **双图模式**：姿势 + 服装。适合将动作和穿搭要求整理成一张参考图。
+- **三图模式**：姿势 + 服装 + 人物照片。人物照片用于提示 AI 参考面部与发型等特征；移除照片即可恢复双图模式。
+- **随机找灵感**：支持一键随机组合、仅随机姿势或仅随机服装；可限制姿势和服装分类，并选择是否包含双人姿势。
+- **固定顺序**：从左到右依次显示姿势、服装、可选人物参考；可选择白色或浅灰背景，以及显示或隐藏图库图片编号。上传的图片没有图库编号，不会显示假编号。图片等比例完整呈现，不强制裁切。
+- **按需大图预览**：点击「大图预览」才打开弹窗；可直接复制合并图片或下载 PNG。
+- **AI 创作提示词**：自动描述每张参考图的用途及对应位置，支持一键复制文本。
+
+> 本项目负责**参考素材组合与提示词整理**，不调用 AI 生图服务，也不提供自动换装或人脸替换。
+
+## 如何使用
+
+1. 打开「**组合制作**」，选择姿势和服装，或者点击「**一键随机组合**」。
+2. 如需保持特定人物形象，在「**组合设置**」中上传人物照片；不上传也能直接制作双图。
+3. 设置背景及是否显示图库编号，点击「**大图预览**」查看效果。
+4. 复制图片、下载 PNG，或展开「**AI 创作提示词**」复制说明，提供给你的 AI 绘图工具。
+
+## 素材库与其他功能
+
+项目内置 **288 组 / 1,439 张姿势参考图**、**1,407 套服装素材**，支持分类、关键词、多角度浏览和原图下载，并提供简体中文、English、日本語界面。
+
+<details>
+<summary>查看素材图库与移动端截图</summary>
+
+**姿势图库**
+
+![姿势参考素材浏览](docs/preview.jpg)
 
 **服装图库**
 
-![服装图库效果图](docs/costumes.jpg)
+![服装参考素材浏览](docs/costumes.jpg)
 
-**组合工作台**
+**移动端**
 
-![姿势与服装图片组合效果图](docs/compose.jpg)
-
-<details>
-<summary>查看手机端效果</summary>
-
-![手机端姿势图库](docs/mobile.jpg)
+![手机端素材图库](docs/mobile.jpg)
 
 </details>
 
-## 功能特色
-
-- **姿势参考**：支持按系列、动作类别、视角和关键词筛选，查看多角度原图。
-- **服装参考**：支持按季节、风格、编号和关键词查找。
-- **图片组合**：选择姿势与服装图片，或上传自己的图片，支持左右 / 上下拼接并下载 PNG。*仅为图片拼接，不是 AI 自动换装。*
-- **多语言**：简体中文、英语、日语自由切换。
-- **离线浏览**：原生 HTML / CSS / JavaScript，无后端、无运行依赖。
-
-## 快速使用
+## 快速开始
 
 ```bash
 git clone https://github.com/vculjp/ai-reference-gallery.git
 cd ai-reference-gallery
 ```
 
-克隆后直接双击 **`index.html`**，即可在浏览器中浏览和下载素材，仓库自带全部图片。
+直接打开 **`index.html`** 即可使用，仓库内包含所需图片资源。网页由原生 HTML、CSS 和 JavaScript 构成，无需后端或运行依赖。
 
-**本地组合导出**：通过 `file://` 打开时，浏览器可能要求访问图片目录。按照页面提示选择项目的 **`img` 文件夹**（内含 `pose/` 与 `costume/`），即可导出 PNG；通过同源 HTTP 网站访问则无需此步骤。
+**本地导出注意**：通过 `file://` 打开时，复制或导出组合图需要根据页面提示授权读取项目的 **`img` 文件夹**（含 `pose/` 和 `costume/`）；通过同源 HTTP 网站访问则无需此步骤。复制图片还需要浏览器支持图片剪贴板功能，不能复制时可使用 PNG 下载。
 
-## 项目结构
+## 项目文件
 
-```text
-ai-reference-gallery/
-├── index.html              # 网页入口
-├── app.js                  # 图库浏览与筛选
-├── composition*.js         # 图片组合与导出
-├── style.css               # 页面样式
-├── composition.css         # 组合工作台样式
-├── i18n.js                 # 中英日多语言
-├── catalog.js              # 姿势索引
-├── costume-catalog.js      # 服装索引
-├── img/
-│   ├── pose/               # 姿势图片
-│   └── costume/            # 服装图片
-├── docs/                   # README 效果图
-└── README.md
-```
+- `index.html` / `app.js`：网页入口与图库交互。
+- `composition-ui.js` / `composition.js`：组合工作台、Canvas 拼接与 PNG 导出。
+- `composition.css` / `style.css`：组合制作与图库样式。
+- `i18n.js`：中英日多语言。
+- `catalog.js` / `costume-catalog.js` / `img/`：素材索引与本地图像。
 
 ## 版权与致谢
 
-- **代码**以 [MIT License](LICENSE) 开源；图片、缩略图及来源衍生素材索引不适用 MIT 代码许可，使用或再分发请查阅 [ASSETS.md](ASSETS.md)。
-- **姿势素材来源**：[ai-pose-gallery](https://ai-pose-gallery.pages.dev/)（原作者：ギア / [@giaaibusi](https://x.com/giaaibusi)）。
-- **服装素材来源**：[ai-costume-gallery](https://ai-costume-gallery.pages.dev/)原作者：ギア / [@giaaibusi](https://x.com/giaaibusi)）。
+- **项目维护者 X**：[@vculjp](https://x.com/vculjp)。
+- **代码**采用 [MIT License](LICENSE)；图片、缩略图及来源衍生索引**不适用 MIT 代码许可**，使用和再分发请参阅 [ASSETS.md](ASSETS.md)。
+- **姿势素材**：[AI Pose Gallery](https://ai-pose-gallery.pages.dev/)；**服装素材**：[AI Costume Gallery](https://ai-costume-gallery.pages.dev/)。
+- **原作者**：ギア（[@giaaibusi](https://x.com/giaaibusi)）。

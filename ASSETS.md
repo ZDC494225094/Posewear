@@ -6,9 +6,9 @@ This project combines a static image viewer with separately sourced visual refer
 
 ## 来源
 
-| 类型 | 原始来源 | 对应文件 |
-| --- | --- | --- |
-| Pose / 姿势参考 | [POSE-DB-01](https://ai-pose-gallery.pages.dev/) | `img/pose/`, `catalog.js` |
+| 类型               | 原始来源                                                    | 对应文件                             |
+| ------------------ | ----------------------------------------------------------- | ------------------------------------ |
+| Pose / 姿势参考    | [AI Pose Gallery](https://ai-pose-gallery.pages.dev/)       | `img/pose/`, `catalog.js`            |
 | Costume / 服装参考 | [AI Costume Gallery](https://ai-costume-gallery.pages.dev/) | `img/costume/`, `costume-catalog.js` |
 
 The images and source-derived metadata remain subject to their respective rights holders' conditions. The maintainer has reported authorization for the project materials; **before publishing a public repository, verify and document the precise permitted scope**, including public redistribution on GitHub, downloadable originals, modifications, and any credit or license requirements.
