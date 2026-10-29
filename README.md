@@ -83,7 +83,7 @@ cd ai-reference-gallery
 
 ![AI Reference Gallery Skill 四宫格示例](docs/skill-four-grid.jpg)
 
-**九宫格：**固定同一套服装，对比 9 种姿势。
+**九宫格：**从站姿与春季服装中随机抽取 9 组组合，**每格的姿势与服装都不重复**。
 
 ![AI Reference Gallery Skill 九宫格示例](docs/skill-nine-grid.jpg)
 
@@ -107,8 +107,8 @@ node .agents/skills/ai-reference-gallery/scripts/gallery.cjs compose --pose-cate
 # 3. 四宫格：4 组春季搭配合成 1 张 PNG
 node .agents/skills/ai-reference-gallery/scripts/gallery.cjs grid --size 4 --pose-category 站姿 --outfit-category spring --seed four-demo --out output/four-grid.png
 
-# 4. 九宫格：固定服装，展示 9 种姿势
-node .agents/skills/ai-reference-gallery/scripts/gallery.cjs grid --size 9 --outfit-id SPR-0001 --seed nine-demo --out output/nine-grid.png
+# 4. 九宫格：随机生成 9 组不重复的姿势与服装
+node .agents/skills/ai-reference-gallery/scripts/gallery.cjs grid --size 9 --pose-category 站姿 --outfit-category spring --seed readme-nine-random-v3 --out output/nine-grid.png
 
 # 5. 加入自己的角色照片，生成三图参考板
 node .agents/skills/ai-reference-gallery/scripts/gallery.cjs compose --pose-id full_sexy_P001_front --outfit-id SPR-0001 --person "C:/Photos/person.png" --out output/my-reference.png

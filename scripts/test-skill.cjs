@@ -74,6 +74,12 @@ test("four- and nine-panel prompts identify each separate option", () => {
   assert.match(gridPrompt(data, nine, { name: "demo.png" }), /第9格/);
   assert.match(gridPrompt(catalogs("en"), nine, null), /Panel 9/);
   assert.match(gridPrompt(catalogs("ja"), nine, null), /9コマ目/);
+  // README's example must show nine distinct poses AND outfits, not only nine
+  // different poses with one repeatedly fixed outfit.
+  const readmeNine = selectCompositions(data, { count: "9",
+    "pose-category": "站姿", "outfit-category": "spring", seed: "readme-nine-random-v3" });
+  assert.equal(new Set(readmeNine.map((p) => p.pose.pose_key)).size, 9);
+  assert.equal(new Set(readmeNine.map((p) => p.outfit.id)).size, 9);
 });
 
 test("grid CLI rejects unsupported sizes, ambiguous counts, and overwrite attempts", () => {
