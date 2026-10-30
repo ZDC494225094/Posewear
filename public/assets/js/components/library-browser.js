@@ -2,6 +2,7 @@ import { h, icon, replace } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { label, number } from "../core/format.js";
 import { toastError, emptyState } from "../core/ui.js";
+import { selectMenu } from "../core/select.js";
 
 // Browse poses or outfits with filters and paging. Used full-page in the
 // library and inside the studio's picker dialog.
@@ -45,11 +46,8 @@ export function libraryBrowser({ type = "pose", mode = "page", withPerson = fals
   }
 
   function select(name, value, options, placeholder, onchange) {
-    return h("label.lib-select",
-      h("span.sr-only", placeholder),
-      h("select.select", { onchange: (e) => onchange(e.target.value) },
-        h("option", { value: "" }, placeholder),
-        options.map((o) => h("option", { value: o.value, selected: o.value === value }, o.text))));
+    return selectMenu({ label: placeholder, value, filled: true, className: `lib-select-${name}`,
+      options: [{ value: "", text: placeholder }, ...options], onChange: onchange }).node;
   }
 
   function renderFilters() {

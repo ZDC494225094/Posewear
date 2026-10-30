@@ -1,6 +1,7 @@
 import { h, replace } from "../../core/dom.js";
 import { api } from "../../core/api.js";
 import { toast, toastError, busy, confirmDialog } from "../../core/ui.js";
+import { selectMenu } from "../../core/select.js";
 import { label, number } from "../../core/format.js";
 import { pageHead, section, form, drawer, statusPill } from "../kit.js";
 
@@ -80,20 +81,34 @@ export async function render() {
   const foot = h("div.a-list-foot");
   const bar = h("div.a-filters");
   const bulkBar = h("div.a-bulk", { hidden: true });
+  const tabs = h("div.seg.a-type-tabs", { role: "tablist", "aria-label": "素材类型" });
+
+  const typeCount = (type, rating) => facets.ratingCounts
+    .filter((r) => r.type === type && (!rating || r.rating === rating)).reduce((n, r) => n + r.n, 0);
 
   function summary() {
-    const count = (type, rating) => facets.ratingCounts.filter((r) => r.type === type && r.rating === rating).reduce((n, r) => n + r.n, 0);
-    return h("div.a-rating-summary", ["pose", "outfit"].map((type) => h("p.small",
-      h("strong", type === "pose" ? "姿势" : "服装"), "：",
-      RATINGS.map(([r, t]) => `${t} ${number(count(type, r))}`).join(" · "))));
+    return h("p.a-rating-summary.small", RATINGS.map(([r, t]) => h("span", `${t} `, h("strong.num", number(typeCount(state.type, r))))));
+  }
+
+  function renderTabs() {
+    replace(tabs, [["pose", "姿势"], ["outfit", "服装"]].map(([value, text]) =>
+      h("button", { type: "button", role: "tab", "aria-selected": String(state.type === value), "aria-pressed": String(state.type === value),
+        onclick: () => {
+          if (state.type === value) return;
+          Object.assign(state, { type: value, series: "", category: "", page: 1 });
+          selected.clear();
+          renderTabs();
+          renderBar();
+          load();
+        } }, text, h("span.chip-note.num", number(typeCount(value))))));
+    summaryBox.replaceChildren(summary());
   }
 
   function renderBar() {
-    const sel = (key, options, aria) => h("select.select", { "aria-label": aria, onchange: (e) => { state[key] = e.target.value; if (key === "type") { state.series = ""; state.category = ""; renderBar(); } state.page = 1; load(); } },
-      options.map(([v, t]) => h("option", { value: v, selected: v === state[key] }, t)));
+    const sel = (key, options, aria) => selectMenu({ label: aria, value: state[key], options,
+      onChange: (v) => { state[key] = v; state.page = 1; load(); } }).node;
     const cats = state.type === "pose" ? facets.pose.categories : facets.outfit.categories;
     replace(bar,
-      sel("type", [["pose", "姿势"], ["outfit", "服装"]], "类型"),
       state.type === "pose" ? sel("series", [["", "全部系列"], ...facets.pose.series.map((s) => [s.key, s.zh])], "系列") : null,
       sel("category", [["", "全部分类"], ...cats.map((c) => [c.key, c.zh])], "分类"),
       sel("rating", [["", "全部分级"], ...RATINGS], "分级"),
@@ -116,7 +131,7 @@ export async function render() {
         toast(`已修改 ${r.changed} 个素材`, { type: "success" });
         selected.clear();
         facets = await api.get("/api/admin/assets/facets");
-        summaryBox.replaceChildren(summary());
+        renderTabs();
         load();
       } catch (err) { toastError(err); }
     });
@@ -150,13 +165,14 @@ export async function render() {
     grid.classList.remove("is-loading");
   }
 
-  const summaryBox = h("div", summary());
+  const summaryBox = h("div.a-tabs-note");
+  renderTabs();
   renderBar();
   load();
   return h("div",
     pageHead("素材库", "管理姿势和服装素材的分级与上架。导入的原项目素材只能停用，后台上传的可以删除。",
-      h("button.btn.btn-primary", { type: "button", onclick: () => uploadDialog(async () => { facets = await api.get("/api/admin/assets/facets"); renderBar(); load(); }) }, "上传素材")),
+      h("button.btn.btn-primary", { type: "button", onclick: () => uploadDialog(async () => { facets = await api.get("/api/admin/assets/facets"); renderTabs(); renderBar(); load(); }) }, "上传素材")),
     h("p.a-callout.small", "版权提醒：原项目的图片素材不在 MIT 许可范围内，商用前请取得权利人授权，或替换为自有素材。"),
-    summaryBox,
+    h("div.a-tabs-row", tabs, summaryBox),
     section(null, null, bar, bulkBar, grid, foot));
 }

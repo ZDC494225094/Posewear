@@ -1,6 +1,7 @@
 import { h, icon, replace } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { toast, toastError, busy, modal } from "../core/ui.js";
+import { selectMenu } from "../core/select.js";
 
 // Building blocks for admin pages: page header, sections, a schema-driven
 // form bound to a settings group, data tables with paging, and drawers.
@@ -38,8 +39,8 @@ function control(field, value, onChange) {
         h("span.switch-ui", { "aria-hidden": "true" }), h("span.switch-text", field.label));
       return h("div.a-field.is-switch", input, field.help ? h("small", field.help) : null);
     case "select":
-      input = h("select.select", { id, onchange: (e) => onChange(field.number ? Number(e.target.value) : e.target.value) },
-        field.options.map(([v, text]) => h("option", { value: v, selected: String(v) === String(value) }, text)));
+      input = selectMenu({ id, label: field.label, value, options: field.options, placeholder: field.placeholder || "请选择",
+        onChange: (v) => onChange(field.number ? Number(v) : v) }).node;
       break;
     case "textarea":
       input = h("textarea.textarea", { id, rows: field.rows || 4, value: value ?? "", placeholder: field.placeholder || "",
@@ -153,8 +154,8 @@ export function listView({ filters = [], load, render, size = 30 }) {
   for (const f of filters) {
     let el;
     if (f.type === "select") {
-      el = h("select.select", { "aria-label": f.label, onchange: (e) => { state.query[f.key] = e.target.value; state.page = 1; refresh(); } },
-        f.options.map(([v, t]) => h("option", { value: v, selected: v === state.query[f.key] }, t)));
+      el = selectMenu({ label: f.label, value: state.query[f.key], options: f.options,
+        onChange: (v) => { state.query[f.key] = v; state.page = 1; refresh(); } }).node;
     } else {
       el = h("input.input", { type: "search", placeholder: f.placeholder || f.label, "aria-label": f.label, value: state.query[f.key],
         oninput: (e) => { clearTimeout(timer); timer = setTimeout(() => { state.query[f.key] = e.target.value.trim(); state.page = 1; refresh(); }, 300); } });

@@ -1,4 +1,5 @@
 import { h, icon, tile } from "./dom.js";
+import { menuOpen } from "./select.js";
 
 // ---------- toast
 
@@ -31,6 +32,7 @@ export function modal({ title, content, footer, wide = false, onClose, label } =
   const backdrop = h("div.modal-backdrop", dialog);
   backdrop.addEventListener("mousedown", (e) => { if (e.target === backdrop) close(); });
   const onKey = (e) => {
+    if (menuOpen()) return; // an open drop-down handles Esc and Tab itself
     if (e.key === "Escape") { e.stopPropagation(); close(); }
     if (e.key === "Tab") {
       const focusables = [...dialog.querySelectorAll("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])")]

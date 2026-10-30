@@ -290,7 +290,6 @@ body[data-page="studio"] .header-row.wrap { width: calc(100% - 64px); }
 .lib-search svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--label-3); pointer-events: none; }
 .lib-search .input { padding-left: 36px; background: var(--fill-2); border-color: transparent; }
 .lib-search .input:focus { background: #fff; }
-.lib-filter-row .select { background-color: var(--fill-2); border-color: transparent; }
 .lib-summary { margin-bottom: 14px; color: var(--label-3); }
 .lib-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); }
 .mode-picker .lib-grid { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 12px; }
