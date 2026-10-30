@@ -123,10 +123,13 @@ const refundRemaining = (job, reason) => {
 };
 
 // The refund includes any usage fee; the held fee is released, not paid out.
+// Free jobs (admin asset generation) have nothing to refund, so their message says nothing about it.
 const fail = tx((job, { code, publicMessage, detail }) => {
+  let message = publicMessage || PUBLIC_MESSAGES.internal;
+  if (!job.cost_credits) message = message.replace(/，本次点数已退回。$/, "。").replace(/本次点数已退回。$/, "");
   db.prepare(`UPDATE generations SET status = 'failed', error_code = ?, error_message = ?, error_detail = ?,
     finished_at = ?, next_attempt_at = NULL WHERE id = ?`)
-    .run(code || "FAILED", publicMessage || PUBLIC_MESSAGES.internal, String(detail || "").slice(0, 4000), Date.now(), job.id);
+    .run(code || "FAILED", message, String(detail || "").slice(0, 4000), Date.now(), job.id);
   refundRemaining(job, "生成失败退回");
   fees.release(job.id);
 });

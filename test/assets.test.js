@@ -238,6 +238,23 @@ test("a failed job refunds the usage fee and pays the owner nothing", async () =
   assert.equal(await balance(alice), aliceBefore);
 });
 
+test("a refused asset job mentions the refund only to users who paid", async () => {
+  const tang = minorOf("outfit", "historical", "tang");
+  const free = await admin.post("/api/admin/asset-jobs", { type: "outfit", categoryId: tang.id, description: "[fake:moderation]" });
+  assert.equal(free.status, 201, JSON.stringify(free.data));
+  const adminJob = await pollJob(admin, "/api/admin", free.data.items[0].id);
+  assert.equal(adminJob.status, "failed");
+  assert.equal(adminJob.errorMessage, "内容未通过模型的安全审核，请调整描述或参考图后重试。");
+
+  const before = await balance(alice);
+  const paid = await alice.post("/api/my/asset-jobs", { type: "outfit", categoryId: tang.id, description: "[fake:moderation]" });
+  assert.equal(paid.status, 201, JSON.stringify(paid.data));
+  const userJob = await pollJob(alice, "/api/my", paid.data.items[0].id);
+  assert.equal(userJob.status, "failed");
+  assert.match(userJob.errorMessage, /本次点数已退回。$/);
+  assert.equal(await balance(alice), before);
+});
+
 test("random picks never return another user's priced asset", async () => {
   for (let i = 0; i < 12; i++) {
     const { data } = await bob.get("/api/library/random?type=pose");
