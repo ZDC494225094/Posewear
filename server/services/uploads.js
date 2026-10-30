@@ -20,13 +20,22 @@ export function uploadFile(row) {
 // Normalize every upload: decode with sharp (rejects non-images and
 // decompression bombs), apply EXIF orientation, drop all metadata (GPS etc.),
 // cap the size, and re-encode. The original bytes are never stored.
+// Kinds: person (identity reference), outfit (one-off clothing reference) and
+// reference (input for generating a library asset). People may appear in
+// person and reference images, so both need consent and are kept briefly.
 export async function saveUpload(user, kind, file, { consent = false } = {}) {
   const gen = settings.get("generation");
-  if (!["person", "outfit"].includes(kind)) throw badRequest("INVALID_INPUT", "上传类型不正确");
+  if (!["person", "outfit", "reference"].includes(kind)) throw badRequest("INVALID_INPUT", "上传类型不正确");
   if (kind === "person" && !gen.allowPersonPhoto) throw forbidden("当前未开放人物照片功能", "PERSON_DISABLED");
   if (kind === "outfit" && !gen.allowOutfitUpload) throw forbidden("当前未开放自定义服装图片", "OUTFIT_UPLOAD_DISABLED");
+  if (kind === "reference" && !settings.get("assets").userGeneration && user.role !== "admin") {
+    throw forbidden("素材生成暂未开放", "ASSET_GEN_DISABLED");
+  }
   if (kind === "person" && !consent) {
     throw badRequest("CONSENT_REQUIRED", "请先确认照片是你本人，或已获得照片中成年人的授权");
+  }
+  if (kind === "reference" && !consent) {
+    throw badRequest("CONSENT_REQUIRED", "请先确认你拥有这张图片的使用权；图中如有他人，需已获得其授权");
   }
   if (!file?.buffer?.length) throw badRequest("FILE_REQUIRED", "请选择要上传的图片");
 
@@ -40,17 +49,18 @@ export async function saveUpload(user, kind, file, { consent = false } = {}) {
   }
 
   const pipeline = input.rotate().resize({ width: 2048, height: 2048, fit: "inside", withoutEnlargement: true });
+  const photo = kind !== "outfit";
   let encoded;
   try {
-    encoded = kind === "person"
-      ? await pipeline.jpeg({ quality: 90, mozjpeg: true }).toBuffer({ resolveWithObject: true })
+    encoded = photo
+      ? await pipeline.flatten({ background: "#ffffff" }).jpeg({ quality: 90, mozjpeg: true }).toBuffer({ resolveWithObject: true })
       : await pipeline.webp({ quality: 92 }).toBuffer({ resolveWithObject: true });
   } catch {
     // e.g. HEIC from phones: the bundled libvips decodes AVIF but not HEVC.
     throw badRequest("INVALID_IMAGE", "无法读取这张图片，请转换为 JPG 或 PNG 后再上传");
   }
-  const ext = kind === "person" ? "jpg" : "webp";
-  const mime = kind === "person" ? "image/jpeg" : "image/webp";
+  const ext = photo ? "jpg" : "webp";
+  const mime = photo ? "image/jpeg" : "image/webp";
 
   const id = randomId(16);
   const rel = path.join(String(user.id), `${id}.${ext}`);
@@ -59,11 +69,11 @@ export async function saveUpload(user, kind, file, { consent = false } = {}) {
   fs.writeFileSync(full, encoded.data);
 
   const safety = settings.get("safety");
-  const days = kind === "person" ? safety.personRetentionDays : safety.outfitRetentionDays;
+  const days = photo ? safety.personRetentionDays : safety.outfitRetentionDays;
   const now = Date.now();
   db.prepare(`INSERT INTO uploads (id, user_id, kind, path, mime, width, height, bytes, consent_at, created_at, expires_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, user.id, kind, rel.replaceAll("\\", "/"), mime,
-    encoded.info.width, encoded.info.height, encoded.data.length, kind === "person" ? now : null, now, now + days * DAY);
+    encoded.info.width, encoded.info.height, encoded.data.length, photo ? now : null, now, now + days * DAY);
   return dto(db.prepare("SELECT * FROM uploads WHERE id = ?").get(id));
 }
 

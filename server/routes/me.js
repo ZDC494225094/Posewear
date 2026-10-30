@@ -4,6 +4,7 @@ import * as auth from "../services/auth.js";
 import * as credits from "../services/credits.js";
 import * as billing from "../services/billing.js";
 import * as settings from "../services/settings.js";
+import * as library from "../services/library.js";
 import { requireUser } from "../middleware.js";
 import * as v from "../lib/validate.js";
 
@@ -18,6 +19,7 @@ router.get("/me", (req, res) => {
 router.patch("/me", requireUser, (req, res) => {
   const nickname = v.str(req.body?.nickname, "nickname", { min: 1, max: 20, message: "昵称长度需为 1–20 个字符" });
   db.prepare("UPDATE users SET nickname = ?, updated_at = ? WHERE id = ?").run(nickname, Date.now(), req.user.id);
+  library.invalidate(); // shared assets show the owner's nickname
   res.json({ user: auth.publicUser(auth.getUser(req.user.id)) });
 });
 

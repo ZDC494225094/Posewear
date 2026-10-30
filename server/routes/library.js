@@ -1,29 +1,45 @@
 import express from "express";
 import * as library from "../services/library.js";
+import * as taxonomy from "../services/taxonomy.js";
 import { notFound } from "../lib/errors.js";
 import * as v from "../lib/validate.js";
 
 export const router = express.Router();
 
-const viewerOf = (req) => ({ loggedIn: !!req.user });
+export const viewerOf = (req) => ({ loggedIn: !!req.user, userId: req.user?.id ?? null });
 const text = (value, max = 80) => (typeof value === "string" ? value.trim().slice(0, max) : "");
+const origin = (value) => (["platform", "user", "mine"].includes(value) ? value : "");
+const license = (value) => (["commercial", "noncommercial"].includes(value) ? value : "");
 
 router.get("/library/meta", (req, res) => {
   res.json(library.meta(viewerOf(req)));
+});
+
+// The category tree for filters and the asset generator.
+router.get("/library/taxonomy", (req, res) => {
+  const admin = req.user?.role === "admin";
+  res.json({
+    pose: taxonomy.tree("pose", { admin, forUser: !admin }),
+    outfit: taxonomy.tree("outfit", { admin, forUser: !admin }),
+    angles: library.ANGLES
+  });
 });
 
 router.get("/library/poses", (req, res) => {
   const { offset, size } = v.page(req.query, { defaultSize: 48, maxSize: 96 });
   res.json(library.queryPoses({
     series: text(req.query.series), category: text(req.query.category), angle: text(req.query.angle),
-    q: text(req.query.q, 60), view: req.query.view === "image" ? "image" : "group"
+    q: text(req.query.q, 60), view: req.query.view === "image" ? "image" : "group",
+    origin: origin(req.query.origin), license: license(req.query.license)
   }, viewerOf(req), { offset, limit: size }));
 });
 
 router.get("/library/outfits", (req, res) => {
   const { offset, size } = v.page(req.query, { defaultSize: 48, maxSize: 96 });
-  res.json(library.queryOutfits({ category: text(req.query.category), q: text(req.query.q, 60) },
-    viewerOf(req), { offset, limit: size }));
+  res.json(library.queryOutfits({
+    series: text(req.query.series), category: text(req.query.category), q: text(req.query.q, 60),
+    origin: origin(req.query.origin), license: license(req.query.license)
+  }, viewerOf(req), { offset, limit: size }));
 });
 
 router.get("/library/random", (req, res) => {

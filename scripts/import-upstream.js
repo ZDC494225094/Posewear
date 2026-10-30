@@ -11,6 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { config } from "../server/config.js";
 import { db, migrate } from "../server/db.js";
+import { OUTFIT_TREE, UPSTREAM_OUTFIT_SERIES } from "../server/services/taxonomy-seed.js";
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => {
@@ -101,12 +102,14 @@ if (copy) {
 
 migrate();
 const now = Date.now();
+// New rows are marked non-commercial (see the licensing notice above); a
+// re-import keeps whatever licence the admin set since.
 const upsert = db.prepare(`INSERT INTO assets (id, type, group_key, code, series, series_zh, series_en, category,
   category_zh, category_en, category_ja, name, name_zh, name_en, angle, angle_zh, angle_en, keywords, people, root,
-  thumb_path, preview_path, original_path, rating, enabled, sort, source, created_at, updated_at)
+  thumb_path, preview_path, original_path, rating, enabled, sort, source, license, created_at, updated_at)
   VALUES (@id, @type, @group_key, @code, @series, @series_zh, @series_en, @category, @category_zh, @category_en,
   @category_ja, @name, @name_zh, @name_en, @angle, @angle_zh, @angle_en, @keywords, @people, 'library',
-  @thumb_path, @preview_path, @original_path, @rating, 1, @sort, 'upstream', @now, @now)
+  @thumb_path, @preview_path, @original_path, @rating, 1, @sort, 'upstream', 'noncommercial', @now, @now)
   ON CONFLICT(id) DO UPDATE SET type = excluded.type, group_key = excluded.group_key, code = excluded.code,
     series = excluded.series, series_zh = excluded.series_zh, series_en = excluded.series_en,
     category = excluded.category, category_zh = excluded.category_zh, category_en = excluded.category_en,
@@ -143,9 +146,11 @@ db.transaction(() => {
   outfits.forEach((item, i) => {
     const rating = outfitRating(item);
     stats.ratings[rating] = (stats.ratings[rating] || 0) + 1;
+    // Seasons and styles sit under a major category (大类) of the outfit tree.
+    const major = OUTFIT_TREE.find((m) => m.key === UPSTREAM_OUTFIT_SERIES[item.category]);
     upsert.run({
       id: item.id, type: "outfit", group_key: item.id, code: item.id,
-      series: "", series_zh: "", series_en: "",
+      series: major?.key || "", series_zh: major?.zh || "", series_en: major?.en || "",
       category: item.category || "", category_zh: item.category_zh || "", category_en: item.category_en || "",
       category_ja: item.category_ja || "",
       name: item.id, name_zh: `${item.category_zh || ""}服装 ${item.id}`.trim(),

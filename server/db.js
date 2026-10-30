@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
 import { config } from "./config.js";
+import { seedCategories, OUTFIT_TREE, UPSTREAM_OUTFIT_SERIES } from "./services/taxonomy-seed.js";
 
 export const db = new Database(config.dbFile);
 db.pragma("journal_mode = WAL");
@@ -282,14 +283,113 @@ const migrations = [
     created_at INTEGER NOT NULL
   );
   CREATE INDEX idx_audit_time ON audit_logs(created_at DESC);
-  `
+  `,
+
+  // 2: asset ownership, licensing and review; the category tree; asset
+  // generation jobs; paid use of shared assets; reference-image uploads.
+  (conn) => {
+    conn.exec(`
+    ALTER TABLE assets ADD COLUMN owner_id INTEGER REFERENCES users(id);
+    ALTER TABLE assets ADD COLUMN license TEXT NOT NULL DEFAULT 'commercial'
+      CHECK (license IN ('commercial', 'noncommercial'));
+    ALTER TABLE assets ADD COLUMN visibility TEXT NOT NULL DEFAULT 'public'
+      CHECK (visibility IN ('public', 'private'));
+    ALTER TABLE assets ADD COLUMN review TEXT NOT NULL DEFAULT 'none'
+      CHECK (review IN ('none', 'pending', 'approved', 'rejected'));
+    ALTER TABLE assets ADD COLUMN review_note TEXT NOT NULL DEFAULT '';
+    ALTER TABLE assets ADD COLUMN price INTEGER NOT NULL DEFAULT 0 CHECK (price >= 0);
+    ALTER TABLE assets ADD COLUMN earned INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE assets ADD COLUMN job_id TEXT;
+    ALTER TABLE assets ADD COLUMN published_at INTEGER;
+    CREATE INDEX idx_assets_owner ON assets(owner_id, type);
+    CREATE INDEX idx_assets_review ON assets(review);
+
+    -- The imported catalog's images are not licensed for commercial use.
+    UPDATE assets SET license = 'noncommercial' WHERE source = 'upstream';
+    -- Uploaded poses used an English angle key; use the catalog's keys.
+    UPDATE assets SET angle = '正面', angle_zh = '正面', angle_en = 'Front' WHERE angle = 'front';
+
+    CREATE TABLE asset_categories (
+      id INTEGER PRIMARY KEY,
+      type TEXT NOT NULL CHECK (type IN ('pose', 'outfit')),
+      parent_id INTEGER REFERENCES asset_categories(id) ON DELETE CASCADE,
+      key TEXT NOT NULL,
+      name_zh TEXT NOT NULL,
+      name_en TEXT NOT NULL DEFAULT '',
+      hint TEXT NOT NULL DEFAULT '',
+      rating TEXT NOT NULL DEFAULT 'general' CHECK (rating IN ('general', 'suggestive', 'explicit')),
+      gen_enabled INTEGER NOT NULL DEFAULT 1,
+      sort INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX idx_cat_major ON asset_categories(type, key) WHERE parent_id IS NULL;
+    CREATE UNIQUE INDEX idx_cat_minor ON asset_categories(parent_id, key) WHERE parent_id IS NOT NULL;
+
+    ALTER TABLE generations ADD COLUMN kind TEXT NOT NULL DEFAULT 'work' CHECK (kind IN ('work', 'asset'));
+    ALTER TABLE generations ADD COLUMN params TEXT;
+    ALTER TABLE generations ADD COLUMN asset_fee INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE generations ADD COLUMN ref_upload_id TEXT;
+    ALTER TABLE generations ADD COLUMN source_asset_id TEXT;
+    CREATE INDEX idx_gen_kind ON generations(kind, user_id, created_at DESC);
+
+    -- Credits paid to use another user's asset: held with the job, paid to the
+    -- owner (minus the platform's share) when it succeeds, refunded if it fails.
+    CREATE TABLE asset_fees (
+      id INTEGER PRIMARY KEY,
+      generation_id TEXT NOT NULL REFERENCES generations(id) ON DELETE CASCADE,
+      asset_id TEXT NOT NULL,
+      owner_id INTEGER NOT NULL,
+      payer_id INTEGER NOT NULL,
+      price INTEGER NOT NULL,
+      rebate INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'held' CHECK (status IN ('held', 'paid', 'refunded')),
+      created_at INTEGER NOT NULL,
+      settled_at INTEGER
+    );
+    CREATE INDEX idx_fees_gen ON asset_fees(generation_id);
+    CREATE INDEX idx_fees_owner ON asset_fees(owner_id, created_at DESC);
+
+    -- Rebuild uploads to allow the 'reference' kind (asset generation input).
+    CREATE TABLE uploads_v2 (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL CHECK (kind IN ('person', 'outfit', 'reference')),
+      path TEXT NOT NULL,
+      mime TEXT NOT NULL,
+      width INTEGER,
+      height INTEGER,
+      bytes INTEGER,
+      consent_at INTEGER,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER,
+      deleted_at INTEGER
+    );
+    INSERT INTO uploads_v2 (id, user_id, kind, path, mime, width, height, bytes, consent_at, created_at, expires_at, deleted_at)
+      SELECT id, user_id, kind, path, mime, width, height, bytes, consent_at, created_at, expires_at, deleted_at FROM uploads;
+    DROP TABLE uploads;
+    ALTER TABLE uploads_v2 RENAME TO uploads;
+    CREATE INDEX idx_uploads_user ON uploads(user_id, created_at DESC);
+    CREATE INDEX idx_uploads_expires ON uploads(expires_at);
+    `);
+    seedCategories(conn);
+    // Imported outfits get a major category (大类) so they sit in the tree.
+    const setSeries = conn.prepare(`UPDATE assets SET series = ?, series_zh = ?, series_en = ?
+      WHERE type = 'outfit' AND series = '' AND category = ?`);
+    for (const [category, key] of Object.entries(UPSTREAM_OUTFIT_SERIES)) {
+      const major = OUTFIT_TREE.find((m) => m.key === key);
+      setSeries.run(key, major.zh, major.en, category);
+    }
+  }
 ];
 
 export function migrate() {
   const current = db.pragma("user_version", { simple: true });
   for (let version = current; version < migrations.length; version++) {
     db.transaction(() => {
-      db.exec(migrations[version]);
+      const step = migrations[version];
+      if (typeof step === "function") step(db);
+      else db.exec(step);
       db.pragma(`user_version = ${version + 1}`);
     })();
   }

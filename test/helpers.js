@@ -88,12 +88,15 @@ export async function startApp({ env = {} } = {}) {
   child.stdout.on("data", (d) => { output += d; });
   child.stderr.on("data", (d) => { output += d; });
   const base = `http://127.0.0.1:${port}`;
-  for (let i = 0; i < 100; i++) {
+  // Test files run in parallel, so startup can be slow; fail loudly rather
+  // than letting every test hit a server that never came up.
+  for (let i = 0; ; i++) {
     try {
       const res = await fetch(`${base}/healthz`);
       if (res.ok) break;
     } catch { /* not up yet */ }
     if (child.exitCode !== null) throw new Error(`Server exited early:\n${output}`);
+    if (i >= 300) { child.kill(); throw new Error(`Server did not start within 30s:\n${output}`); }
     await new Promise((r) => setTimeout(r, 100));
   }
   return {

@@ -8,6 +8,8 @@ export const LEDGER_KINDS = {
   purchase: "充值",
   redeem: "兑换码",
   generation: "生成消耗",
+  asset_generation: "素材生成",
+  asset_income: "素材收益",
   refund: "失败退回",
   admin: "后台调整"
 };

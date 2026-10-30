@@ -38,8 +38,9 @@ export function overview({ days = 30 } = {}) {
       COALESCE(SUM(CASE WHEN paid_at >= ? THEN amount_cents END), 0) AS period,
       COUNT(*) AS orders
     FROM orders WHERE status = 'paid'`).get(today, since);
+  // Net credits consumed: usage fees paid on to asset owners are not spent.
   const spent = db.prepare(`SELECT COALESCE(-SUM(delta), 0) AS n FROM credit_ledger
-    WHERE kind IN ('generation', 'refund') AND created_at >= ?`).get(since).n;
+    WHERE kind IN ('generation', 'asset_generation', 'asset_income', 'refund') AND created_at >= ?`).get(since).n;
   const outstanding = db.prepare("SELECT COALESCE(SUM(credits), 0) AS n FROM users").get().n;
 
   const genDaily = db.prepare(`SELECT ${sqlLocalDate("created_at")} AS day, COUNT(*) AS total,
@@ -58,6 +59,8 @@ export function overview({ days = 30 } = {}) {
   const pendingReports = db.prepare("SELECT COUNT(*) AS n FROM reports WHERE status = 'open'").get().n;
   const pendingReview = settings.get("safety").showcaseReview ? db.prepare(`SELECT COUNT(*) AS n FROM generations
     WHERE is_public = 1 AND approved = 0 AND hidden = 0 AND deleted_at IS NULL`).get().n : 0;
+  const pendingAssets = db.prepare(`SELECT COUNT(*) AS n FROM assets
+    WHERE review = 'pending' AND visibility = 'public' AND enabled = 1`).get().n;
 
   const rev = series(span, revDaily, ["revenue"]);
   const signups = series(span, userDaily, ["signups"]);
@@ -85,6 +88,7 @@ export function overview({ days = 30 } = {}) {
     recentFailures,
     pendingReports,
     pendingReview,
+    pendingAssets,
     library: libraryCounts(),
     warnings: warnings()
   };

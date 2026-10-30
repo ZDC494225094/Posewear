@@ -9,15 +9,17 @@ import * as v from "../lib/validate.js";
 
 export const router = express.Router();
 
+const UPLOAD_KINDS = ["person", "outfit", "reference"];
+
 router.post("/uploads", requireUser, uploadSingle, async (req, res) => {
   enforce(`upload:${req.user.id}`, 40, 10 * 60 * 1000, "上传太频繁，请稍后再试");
-  const kind = v.oneOf(req.body?.kind, "kind", ["person", "outfit"]);
+  const kind = v.oneOf(req.body?.kind, "kind", UPLOAD_KINDS);
   const upload = await uploads.saveUpload(req.user, kind, req.file, { consent: v.bool(req.body?.consent) });
   res.status(201).json({ upload });
 });
 
 router.get("/uploads", requireUser, (req, res) => {
-  const kind = v.oneOf(req.query.kind, "kind", ["person", "outfit"]);
+  const kind = v.oneOf(req.query.kind, "kind", UPLOAD_KINDS);
   res.json({ items: uploads.listUploads(req.user, kind) });
 });
 

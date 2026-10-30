@@ -111,6 +111,65 @@ export const DEFAULTS = {
   library: {
     originalDownload: "login"
   },
+  // Asset generation (platform and user), sharing and revenue split. The
+  // templates follow the existing asset specs: line-art mannequins for poses,
+  // ghost-mannequin product renders for outfits.
+  assets: {
+    userGeneration: true,
+    quality: "medium",
+    tier: "standard",
+    poseCredits: 6,
+    outfitCredits: 6,
+    maxPerJob: 4,
+    dailyLimitPerUser: 20,
+    publicReview: true,
+    maxPrice: 50,
+    rebatePercent: 70,
+    commercialOnly: false,
+    posePrompt: [
+      "A clean pose-reference drawing: black line art of one female artist's mannequin on a pure white background.",
+      "The mannequin has a smooth egg-shaped head with one vertical and one horizontal guide line showing where the face points, no facial features and no hair, ball joints at the shoulders, elbows, wrists, hips, knees and ankles, simple anatomical body contours with a few light construction lines, and detailed hands and feet.",
+      "Thin, even black outlines only: no shading, no colour, no clothing, no floor, no shadow, no text. The whole body is visible with a small margin, centred in a portrait frame.",
+      "Pose category: {category}.",
+      "Category guidance: {hint}.",
+      "Pose: {description}.",
+      "Camera: {angle}."
+    ].join("\n"),
+    poseRefPrompt: [
+      "Image 1 shows a person or figure in a pose. Redraw only that body pose as a clean pose-reference drawing: black line art of one female artist's mannequin on a pure white background.",
+      "The mannequin has a smooth egg-shaped head with one vertical and one horizontal guide line showing where the face points, no facial features and no hair, ball joints at the shoulders, elbows, wrists, hips, knees and ankles, simple anatomical body contours, and detailed hands and feet.",
+      "Match the pose, limb positions, head direction and camera angle of image 1. Ignore its clothing, face, hair, body shape, props and background.",
+      "Thin, even black outlines only: no shading, no colour, no clothing, no floor, no shadow, no text. The whole body is visible with a small margin, centred in a portrait frame.",
+      "Pose category: {category}.",
+      "Notes: {description}."
+    ].join("\n"),
+    poseAnglePrompt: [
+      "Image 1 is a pose-reference drawing of an artist's mannequin. Draw the same mannequin holding exactly the same pose, seen from a different camera angle: {angle}.",
+      "Keep the same drawing style: black line art on a pure white background, egg-shaped head with guide lines, ball joints, no shading, no colour, no floor, no text. The whole body is visible with a small margin, centred in a portrait frame."
+    ].join("\n"),
+    outfitPrompt: [
+      "A product render of one complete women's outfit on an invisible mannequin (ghost mannequin style): the garments keep the 3D shape of a slim adult body, but no person, skin, face or hands are visible.",
+      "Show the whole look from head to toe in front view, centred in a portrait frame: any hat or headwear floats above the collar, the shoes stand below the hem, and a bag or small accessory may hang beside the outfit.",
+      "Photorealistic fabrics, stitching and details, soft even studio lighting, a seamless light grey gradient background, no props, no text, no logos.",
+      "Outfit category: {category}.",
+      "Typical pieces in this category: {hint}.",
+      "Outfit details: {description}."
+    ].join("\n"),
+    outfitRefPrompt: [
+      "Image 1 shows an outfit. Recreate the same outfit, keeping its garments, colours, fabrics, patterns and accessories, as a product render on an invisible mannequin (ghost mannequin style): the garments keep the 3D shape of a slim adult body, but no person, skin, face or hands are visible.",
+      "Show the whole look from head to toe in front view, centred in a portrait frame, with any hat floating above the collar and the shoes below the hem. Ignore the person, pose and background of image 1.",
+      "Photorealistic fabrics, soft even studio lighting, a seamless light grey gradient background, no props, no text, no logos.",
+      "Outfit category: {category}.",
+      "Notes: {description}."
+    ].join("\n"),
+    angles: {
+      "正面": "front view, the figure faces the viewer, camera at chest height",
+      "斜め": "three-quarter view, the figure turned about 45 degrees from the viewer, camera at chest height",
+      "横": "side view, the figure seen in profile, camera at chest height",
+      "上から": "high-angle view, looking down at the figure from above",
+      "下から": "low-angle view, looking up at the figure from below"
+    }
+  },
   payment: {
     orderExpireMinutes: 30,
     mock: { enabled: false },
@@ -352,6 +411,30 @@ function sanitize(group, v) {
     }
     case "library":
       return { originalDownload: pick(v.originalDownload, ["public", "login", "disabled"], d.originalDownload) };
+    case "assets": {
+      const angles = {};
+      for (const key of Object.keys(d.angles)) angles[key] = text(v.angles?.[key], d.angles[key], 300).trim() || d.angles[key];
+      const template = (key) => text(v[key], d[key], 3000).trim() || d[key];
+      return {
+        userGeneration: flag(v.userGeneration, d.userGeneration),
+        quality: pick(v.quality, ["low", "medium", "high"], d.quality),
+        tier: pick(v.tier, ["standard", "hd"], d.tier),
+        poseCredits: intIn(v.poseCredits, 0, 100000, d.poseCredits),
+        outfitCredits: intIn(v.outfitCredits, 0, 100000, d.outfitCredits),
+        maxPerJob: intIn(v.maxPerJob, 1, 4, d.maxPerJob),
+        dailyLimitPerUser: intIn(v.dailyLimitPerUser, 0, 10000, d.dailyLimitPerUser),
+        publicReview: flag(v.publicReview, d.publicReview),
+        maxPrice: intIn(v.maxPrice, 0, 10000, d.maxPrice),
+        rebatePercent: intIn(v.rebatePercent, 0, 100, d.rebatePercent),
+        commercialOnly: flag(v.commercialOnly, d.commercialOnly),
+        posePrompt: template("posePrompt"),
+        poseRefPrompt: template("poseRefPrompt"),
+        poseAnglePrompt: template("poseAnglePrompt"),
+        outfitPrompt: template("outfitPrompt"),
+        outfitRefPrompt: template("outfitRefPrompt"),
+        angles
+      };
+    }
     case "payment": {
       const a = v.alipay || {}, w = v.wechat || {};
       return {
@@ -400,7 +483,7 @@ export function publicBaseUrl(req) {
 // The subset of configuration the browser needs. Nothing secret.
 export function publicConfig() {
   const site = get("site"), auth = get("auth"), gen = get("generation"), safety = get("safety"),
-    payment = get("payment"), mail = get("mail"), library = get("library");
+    payment = get("payment"), mail = get("mail"), library = get("library"), assets = get("assets");
   const providers = [];
   if (payment.alipay.enabled) providers.push("alipay");
   if (payment.wechat.enabled) providers.push("wechat");
@@ -432,6 +515,12 @@ export function publicConfig() {
     },
     payment: { providers },
     showcase: { enabled: safety.showcaseEnabled },
-    library: { originalDownload: library.originalDownload, showSuggestive: safety.showSuggestive }
+    library: { originalDownload: library.originalDownload, showSuggestive: safety.showSuggestive },
+    assets: {
+      generation: assets.userGeneration && gen.enabled,
+      poseCredits: assets.poseCredits, outfitCredits: assets.outfitCredits, maxPerJob: assets.maxPerJob,
+      maxPrice: assets.maxPrice, rebatePercent: assets.rebatePercent, publicReview: assets.publicReview,
+      referenceRetentionDays: safety.personRetentionDays
+    }
   };
 }

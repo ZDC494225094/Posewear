@@ -7,6 +7,9 @@ import * as credits from "./credits.js";
 import * as library from "./library.js";
 import * as uploads from "./uploads.js";
 import * as channels from "./channels.js";
+import * as assetJobs from "./asset-jobs.js";
+import * as fees from "./asset-fees.js";
+import { InputError } from "./asset-jobs.js";
 import { providerFor, ProviderError, PUBLIC_MESSAGES } from "./providers/index.js";
 import { finalizeImage } from "./image-post.js";
 import { apiCostUsd } from "./pricing.js";
@@ -75,11 +78,15 @@ async function prepare(file, { lineArt, maxEdge }) {
     : { buffer: await pipeline.flatten({ background: "#ffffff" }).jpeg({ quality: 92 }).toBuffer(), mime: "image/jpeg", ext: "jpg" };
 }
 
-class InputError extends Error {}
-
 async function loadInputs(job) {
   const maxEdge = settings.get("generation").inputMaxEdge;
   const images = [];
+  if (job.kind === "asset") {
+    for (const input of assetJobs.inputFiles(job)) {
+      images.push({ ...(await prepare(input.file, { lineArt: input.lineArt, maxEdge })), name: input.name });
+    }
+    return images.map((img) => ({ ...img, name: `${img.name}.${img.ext}` }));
+  }
   if (job.pose_id) {
     const asset = library.getAsset(job.pose_id);
     const file = asset && library.aiSourceFile(asset);
@@ -115,11 +122,13 @@ const refundRemaining = (job, reason) => {
   }
 };
 
+// The refund includes any usage fee; the held fee is released, not paid out.
 const fail = tx((job, { code, publicMessage, detail }) => {
   db.prepare(`UPDATE generations SET status = 'failed', error_code = ?, error_message = ?, error_detail = ?,
     finished_at = ?, next_attempt_at = NULL WHERE id = ?`)
     .run(code || "FAILED", publicMessage || PUBLIC_MESSAGES.internal, String(detail || "").slice(0, 4000), Date.now(), job.id);
   refundRemaining(job, "生成失败退回");
+  fees.release(job.id);
 });
 
 function requeue(job, delayMs, { countAttempt = true, detail = "" } = {}) {
@@ -154,9 +163,12 @@ async function saveResults(job, result, channel, size) {
       usage = ?, api_cost_usd = ?, error_code = NULL, error_message = NULL, error_detail = NULL, next_attempt_at = NULL
       WHERE id = ?`).run(Date.now(), channel.id, channel.model, size,
       result.usage ? JSON.stringify(result.usage) : null, cost, job.id);
-    // The model may return fewer images than asked for; refund the shortfall.
+    // Asset owners are paid once per successful job.
+    fees.settle(job.id);
+    // The model may return fewer images than asked for; refund the shortfall
+    // of the per-image price (the usage fee is per job and stays charged).
     if (stored.length < job.n) {
-      const perImage = Math.floor(job.cost_credits / job.n);
+      const perImage = Math.floor((job.cost_credits - job.asset_fee) / job.n);
       const amount = perImage * (job.n - stored.length);
       if (amount > 0) {
         credits.adjust(job.user_id, amount, "refund", { refType: "generation", refId: job.id,
@@ -204,7 +216,8 @@ async function runJob(job) {
         moderation: gen.moderation, outputFormat: "png", outputCompression: gen.outputCompression,
         safetyIdentifier, timeoutSec: gen.requestTimeoutSec
       });
-      await saveResults(job, result, channel, result.size && result.size !== "auto" ? result.size : size);
+      const save = job.kind === "asset" ? assetJobs.saveResults : saveResults;
+      await save(job, result, channel, result.size && result.size !== "auto" ? result.size : size);
       channels.markSuccess(channel.id);
       log.info(`Generation ${job.id} succeeded on channel #${channel.id} (${result.images.length} image(s))`);
       return;

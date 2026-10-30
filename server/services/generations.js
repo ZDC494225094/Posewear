@@ -7,6 +7,7 @@ import * as credits from "./credits.js";
 import * as library from "./library.js";
 import * as uploads from "./uploads.js";
 import * as channels from "./channels.js";
+import * as fees from "./asset-fees.js";
 import { buildPrompt, findBannedWord } from "./prompt.js";
 import { creditCost, unitCost } from "./pricing.js";
 import { flexibleSize } from "./sizes.js";
@@ -40,14 +41,18 @@ function imagesFor(ids) {
   return map;
 }
 
+// `license` covers the library assets used: commercial only if every one is.
+// Uploaded images are the user's own responsibility and don't count.
 function refSummary(row) {
   const pose = row.pose_id ? library.getAsset(row.pose_id) : null;
   const outfit = row.outfit_id ? library.getAsset(row.outfit_id) : null;
+  const used = [pose, outfit].filter(Boolean);
   return {
     pose: pose ? { id: pose.id, thumb: library.dto(pose).thumb, name: pose.name_zh || pose.name } : row.pose_id ? { id: row.pose_id } : null,
     outfit: outfit ? { id: outfit.id, thumb: library.dto(outfit).thumb, name: outfit.name_zh || outfit.name }
       : row.outfit_upload_id ? { upload: true } : null,
-    person: !!row.person_upload_id
+    person: !!row.person_upload_id,
+    license: !used.length ? null : used.every((a) => a.license === "commercial") ? "commercial" : "noncommercial"
   };
 }
 
@@ -57,7 +62,7 @@ export function dto(row, images = []) {
     id: row.id, status: row.status, mode: row.mode,
     style: row.style, scene: row.scene, prompt: row.prompt_user,
     ratio: row.ratio, tier: row.tier, size: row.size, quality: row.quality, n: row.n,
-    cost: row.cost_credits, refunded: row.refunded_credits,
+    cost: row.cost_credits, refunded: row.refunded_credits, assetFee: row.asset_fee,
     errorCode: row.error_code, errorMessage: row.error_message,
     isPublic: !!row.is_public, hidden: !!row.hidden, featured: !!row.featured, approved: !!row.approved,
     refs: refSummary(row),
@@ -94,11 +99,12 @@ export function validateRequest(user, input) {
   if (personUpload && !gen.allowPersonPhoto) throw forbidden("当前未开放人物照片功能", "PERSON_DISABLED");
   if (personUpload && !personUpload.consent_at) throw badRequest("CONSENT_REQUIRED", "请先确认人物照片的使用授权");
   const withPerson = !!personUpload;
+  const viewer = { loggedIn: true, userId: user.id };
 
   let pose = null;
   if (input.poseId) {
     pose = library.getAsset(input.poseId);
-    if (!pose || pose.type !== "pose" || !library.visible(pose, { loggedIn: true })) {
+    if (!pose || pose.type !== "pose" || !library.visible(pose, viewer)) {
       throw badRequest("POSE_UNAVAILABLE", "所选姿势已下架，请重新选择");
     }
     if (!library.usableForAI(pose, { withPerson })) {
@@ -112,7 +118,7 @@ export function validateRequest(user, input) {
   if (input.outfitId && input.outfitUploadId) throw badRequest("INVALID_INPUT", "服装只能选择一个来源");
   if (input.outfitId) {
     outfit = library.getAsset(input.outfitId);
-    if (!outfit || outfit.type !== "outfit" || !library.visible(outfit, { loggedIn: true })) {
+    if (!outfit || outfit.type !== "outfit" || !library.visible(outfit, viewer)) {
       throw badRequest("OUTFIT_UNAVAILABLE", "所选服装已下架，请重新选择");
     }
     if (!library.usableForAI(outfit, { withPerson })) {
@@ -129,12 +135,17 @@ export function validateRequest(user, input) {
     if (!userText) throw badRequest("PROMPT_REQUIRED", "没有参考图时，请写下想要的画面描述");
   }
 
-  return { gen, quality, tier, ratio, n, style, scene, userText, pose, outfit, outfitUpload, personUpload };
+  // Shared assets from other users cost their price once per job.
+  const assetFees = [pose, outfit].filter(Boolean).map((asset) => ({ asset, price: library.feeFor(asset, user.id) }))
+    .filter((f) => f.price > 0);
+  const assetFee = assetFees.reduce((sum, f) => sum + f.price, 0);
+
+  return { gen, quality, tier, ratio, n, style, scene, userText, pose, outfit, outfitUpload, personUpload, assetFees, assetFee };
 }
 
 export function estimate(user, input) {
   const r = validateRequest(user, input);
-  return { cost: creditCost(r), unit: unitCost(r.quality, r.tier), size: flexibleSize(r.ratio, r.tier) };
+  return { cost: creditCost(r) + r.assetFee, assetFee: r.assetFee, unit: unitCost(r.quality, r.tier), size: flexibleSize(r.ratio, r.tier) };
 }
 
 export function create(user, input, { ip }) {
@@ -149,14 +160,14 @@ export function create(user, input, { ip }) {
     throw new HttpError(429, "TOO_MANY_ACTIVE", `最多同时进行 ${r.gen.maxActivePerUser} 个任务，请等当前任务完成`);
   }
   if (r.gen.dailyLimitPerUser > 0) {
-    const today = db.prepare("SELECT COUNT(*) AS n FROM generations WHERE user_id = ? AND created_at >= ?")
+    const today = db.prepare("SELECT COUNT(*) AS n FROM generations WHERE user_id = ? AND kind = 'work' AND created_at >= ?")
       .get(user.id, startOfLocalDay()).n;
     if (today >= r.gen.dailyLimitPerUser) {
       throw new HttpError(429, "DAILY_LIMIT", `今日生成次数已达上限（${r.gen.dailyLimitPerUser} 次），明天再来吧`);
     }
   }
 
-  const cost = creditCost(r);
+  const cost = creditCost(r) + r.assetFee;
   const prompt = buildPrompt({
     pose: r.pose, outfit: r.outfit || r.outfitUpload, outfitKeywords: r.outfit?.keywords || "",
     person: !!r.personUpload, style: r.style, scene: r.scene, userText: r.userText
@@ -166,15 +177,17 @@ export function create(user, input, { ip }) {
   const hasImages = !!(r.pose || r.outfit || r.outfitUpload || r.personUpload);
 
   tx(() => {
+    const label = r.gen.qualities.find((q) => q.id === r.quality)?.label || r.quality;
     credits.adjust(user.id, -cost, "generation", { refType: "generation", refId: id,
-      note: `${r.n} 张 · ${r.gen.qualities.find((q) => q.id === r.quality)?.label || r.quality}` });
+      note: `${r.n} 张 · ${label}${r.assetFee ? ` · 含素材使用费 ${r.assetFee} 点` : ""}` });
     db.prepare(`INSERT INTO generations (id, user_id, status, mode, pose_id, outfit_id, outfit_upload_id, person_upload_id,
-      style, scene, prompt_user, prompt_final, ratio, tier, size, quality, n, cost_credits, consent_at, client_ip, created_at)
-      VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      style, scene, prompt_user, prompt_final, ratio, tier, size, quality, n, cost_credits, asset_fee, consent_at, client_ip, created_at)
+      VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       id, user.id, hasImages ? "edit" : "generate", r.pose?.id || null, r.outfit?.id || null,
       r.outfitUpload?.id || null, r.personUpload?.id || null, r.style?.id || "", r.scene?.id || "",
-      r.userText, prompt, r.ratio, r.tier, flexibleSize(r.ratio, r.tier), r.quality, r.n, cost,
+      r.userText, prompt, r.ratio, r.tier, flexibleSize(r.ratio, r.tier), r.quality, r.n, cost, r.assetFee,
       r.personUpload ? r.personUpload.consent_at : null, ip, now);
+    if (r.assetFees.length) fees.hold(id, user.id, r.assetFees);
     library.bumpUse([r.pose?.id, r.outfit?.id]);
   })();
 
@@ -184,13 +197,13 @@ export function create(user, input, { ip }) {
 // ---------- read
 
 export function getOwned(user, id) {
-  const row = db.prepare("SELECT * FROM generations WHERE id = ? AND user_id = ? AND deleted_at IS NULL").get(String(id), user.id);
+  const row = db.prepare("SELECT * FROM generations WHERE id = ? AND user_id = ? AND kind = 'work' AND deleted_at IS NULL").get(String(id), user.id);
   if (!row) throw notFound("作品不存在或已删除");
   return withImages([row])[0];
 }
 
 export function listOwned(user, { status, offset, size }) {
-  const where = ["user_id = ?", "deleted_at IS NULL"];
+  const where = ["user_id = ?", "kind = 'work'", "deleted_at IS NULL"];
   const params = [user.id];
   if (status === "active") where.push("status IN ('queued','running')");
   else if (["succeeded", "failed"].includes(status)) { where.push("status = ?"); params.push(status); }
@@ -205,13 +218,13 @@ export function listOwned(user, { status, offset, size }) {
 export function statusOf(user, ids) {
   const list = ids.slice(0, 50).map(String);
   if (!list.length) return [];
-  const rows = db.prepare(`SELECT * FROM generations WHERE user_id = ? AND id IN (${list.map(() => "?").join(",")})`)
+  const rows = db.prepare(`SELECT * FROM generations WHERE user_id = ? AND kind = 'work' AND id IN (${list.map(() => "?").join(",")})`)
     .all(user.id, ...list);
   return withImages(rows);
 }
 
 export function softDelete(user, id) {
-  const row = db.prepare("SELECT * FROM generations WHERE id = ? AND user_id = ? AND deleted_at IS NULL").get(String(id), user.id);
+  const row = db.prepare("SELECT * FROM generations WHERE id = ? AND user_id = ? AND kind = 'work' AND deleted_at IS NULL").get(String(id), user.id);
   if (!row) throw notFound("作品不存在或已删除");
   if (row.status === "queued" || row.status === "running") throw badRequest("JOB_ACTIVE", "任务进行中，完成后才能删除");
   removeFiles(row.id);
@@ -228,7 +241,7 @@ export function removeFiles(generationId) {
 }
 
 export function setPublic(user, id, isPublic) {
-  const row = db.prepare("SELECT * FROM generations WHERE id = ? AND user_id = ? AND deleted_at IS NULL").get(String(id), user.id);
+  const row = db.prepare("SELECT * FROM generations WHERE id = ? AND user_id = ? AND kind = 'work' AND deleted_at IS NULL").get(String(id), user.id);
   if (!row) throw notFound("作品不存在或已删除");
   const safety = settings.get("safety");
   if (isPublic) {
@@ -266,10 +279,11 @@ export function showcase({ offset, size, featuredOnly = false }) {
 
 // ---------- admin
 
-export function adminList({ status, userId, q, isPublic, offset, size }) {
+export function adminList({ status, kind, userId, q, isPublic, offset, size }) {
   const where = ["1 = 1"];
   const params = [];
   if (status) { where.push("g.status = ?"); params.push(status); }
+  if (kind) { where.push("g.kind = ?"); params.push(kind); }
   if (userId) { where.push("g.user_id = ?"); params.push(Number(userId)); }
   if (isPublic === "1") where.push("g.is_public = 1");
   if (isPublic === "pending") where.push("g.is_public = 1 AND g.approved = 0 AND g.hidden = 0 AND g.deleted_at IS NULL");
@@ -288,7 +302,8 @@ export function adminList({ status, userId, q, isPublic, offset, size }) {
       attempts: r.attempts, errorDetail: r.error_detail, apiCostUsd: r.api_cost_usd,
       usage: r.usage ? JSON.parse(r.usage) : null, promptFinal: r.prompt_final,
       deleted: !!r.deleted_at, clientIp: r.client_ip, hasPerson: !!r.person_upload_id,
-      personUploadId: r.person_upload_id, outfitUploadId: r.outfit_upload_id
+      personUploadId: r.person_upload_id, outfitUploadId: r.outfit_upload_id,
+      kind: r.kind, refUploadId: r.ref_upload_id, assetJob: r.kind === "asset" ? JSON.parse(r.params || "{}") : null
     }))
   };
 }

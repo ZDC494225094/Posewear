@@ -3,6 +3,8 @@ import { db, tx } from "../db.js";
 import * as settings from "../services/settings.js";
 import * as channels from "../services/channels.js";
 import * as library from "../services/library.js";
+import * as taxonomy from "../services/taxonomy.js";
+import * as assetJobs from "../services/asset-jobs.js";
 import * as generations from "../services/generations.js";
 import * as billing from "../services/billing.js";
 import * as credits from "../services/credits.js";
@@ -31,17 +33,18 @@ router.get("/admin/overview", (req, res) => {
 
 // ---------- settings
 
-const GROUPS = ["site", "auth", "generation", "prompt", "safety", "library", "payment", "mail", "legal"];
+const GROUPS = ["site", "auth", "generation", "prompt", "safety", "library", "assets", "payment", "mail", "legal"];
 
 router.get("/admin/settings/:group", (req, res) => {
   const group = v.oneOf(req.params.group, "group", GROUPS);
-  res.json({ group, value: settings.getForAdmin(group), defaults: group === "prompt" ? settings.DEFAULTS.prompt : undefined });
+  const defaults = group === "prompt" || group === "assets" ? settings.DEFAULTS[group] : undefined;
+  res.json({ group, value: settings.getForAdmin(group), defaults });
 });
 
 router.put("/admin/settings/:group", (req, res) => {
   const group = v.oneOf(req.params.group, "group", GROUPS);
   const value = settings.update(group, req.body?.value);
-  if (group === "safety" || group === "library") library.invalidate();
+  if (group === "safety" || group === "library" || group === "assets") library.invalidate();
   audit(req, "settings.update", "settings", group);
   res.json({ group, value });
 });
@@ -168,6 +171,8 @@ router.patch("/admin/users/:id", (req, res) => {
       .run(...keys.map((k) => patch[k]), Date.now(), user.id);
     if (patch.status === "banned") auth.destroyUserSessions(user.id);
     if (patch.email_verified) auth.grantSignupRewards(user.id);
+    // Shared assets show the owner's nickname and hide while the owner is banned.
+    if (patch.status || patch.nickname) library.invalidate();
   }
   audit(req, "user.update", "user", user.id, patch);
   res.json({ user: auth.publicUser(auth.getUser(user.id)) });
@@ -198,6 +203,7 @@ router.get("/admin/generations", (req, res) => {
   const { offset, size } = v.page(req.query, { defaultSize: 24, maxSize: 60 });
   res.json(generations.adminList({
     status: req.query.status ? String(req.query.status) : "", userId: req.query.userId,
+    kind: ["work", "asset"].includes(req.query.kind) ? req.query.kind : "",
     q: String(req.query.q || "").trim(), isPublic: String(req.query.public || ""), offset, size
   }));
 });
@@ -290,9 +296,10 @@ router.get("/admin/redeem/export.csv", (req, res) => {
 
 router.get("/admin/assets", (req, res) => {
   const { offset, size } = v.page(req.query, { defaultSize: 48, maxSize: 200 });
+  const q = req.query;
   res.json(library.adminList({
-    type: req.query.type, rating: req.query.rating, enabled: req.query.enabled,
-    series: req.query.series, category: req.query.category, q: req.query.q, source: req.query.source
+    type: q.type, rating: q.rating, enabled: q.enabled, series: q.series, category: q.category, q: q.q,
+    source: q.source, origin: q.origin, license: q.license, review: q.review, ownerId: q.ownerId
   }, { offset, size }));
 });
 
@@ -311,10 +318,11 @@ router.post("/admin/assets/bulk", (req, res) => {
 });
 
 router.post("/admin/assets/upload", uploadSingle, async (req, res) => {
+  const b = req.body || {};
   const asset = await library.createCustomAsset({
-    type: req.body?.type, category: req.body?.category, categoryZh: req.body?.categoryZh, categoryEn: req.body?.categoryEn,
-    nameZh: req.body?.nameZh, nameEn: req.body?.nameEn, keywords: req.body?.keywords, rating: req.body?.rating || "general",
-    series: req.body?.series, seriesZh: req.body?.seriesZh, seriesEn: req.body?.seriesEn, people: req.body?.people
+    type: b.type, categoryId: b.categoryId, category: b.category, categoryZh: b.categoryZh, categoryEn: b.categoryEn,
+    nameZh: b.nameZh, nameEn: b.nameEn, keywords: b.keywords, rating: b.rating || "general", license: b.license || "commercial",
+    series: b.series, seriesZh: b.seriesZh, seriesEn: b.seriesEn, people: b.people
   }, req.file);
   audit(req, "asset.create", "asset", asset.id);
   res.status(201).json({ asset });
@@ -323,6 +331,61 @@ router.post("/admin/assets/upload", uploadSingle, async (req, res) => {
 router.delete("/admin/assets/:id", (req, res) => {
   library.deleteCustomAsset(req.params.id);
   audit(req, "asset.delete", "asset", req.params.id);
+  res.json({ ok: true });
+});
+
+// ---------- asset generation
+
+router.post("/admin/asset-jobs", (req, res) => {
+  const items = assetJobs.createJobs(req.user, req.body || {}, { admin: true, ip: req.ip });
+  worker.kick();
+  audit(req, "asset.generate", "generation", items.map((j) => j.id).join(","),
+    { type: items[0]?.type, category: items[0]?.category, n: items.reduce((n, j) => n + j.n, 0) });
+  res.status(201).json({ items });
+});
+
+router.get("/admin/asset-jobs", (req, res) => {
+  const ids = String(req.query.ids || "").split(",").map((s) => s.trim()).filter(Boolean).slice(0, 50);
+  if (ids.length) return res.json({ items: assetJobs.listJobs({ ids, admin: true }) });
+  const { offset, size } = v.page(req.query, { defaultSize: 20, maxSize: 60 });
+  res.json(assetJobs.listJobs({
+    admin: true, offset, size,
+    status: ["active", "succeeded", "failed"].includes(req.query.status) ? req.query.status : "",
+    scope: ["platform", "user"].includes(req.query.scope) ? req.query.scope : ""
+  }));
+});
+
+// ---------- asset categories
+
+function categoryTree(type) {
+  const count = (node) => library.categoryUsage(taxonomy.get(node.id));
+  return taxonomy.tree(type, { admin: true }).map((major) => ({
+    ...major, count: count(major), children: major.children.map((c) => ({ ...c, count: count(c) }))
+  }));
+}
+
+router.get("/admin/asset-categories", (req, res) => {
+  res.json({ pose: categoryTree("pose"), outfit: categoryTree("outfit") });
+});
+
+router.post("/admin/asset-categories", (req, res) => {
+  const row = taxonomy.create(req.body || {});
+  library.invalidate();
+  audit(req, "category.create", "category", row.id, { type: row.type, key: row.key, name: row.name_zh });
+  res.status(201).json({ category: taxonomy.dto(row) });
+});
+
+router.put("/admin/asset-categories/:id", (req, res) => {
+  const row = taxonomy.update(req.params.id, req.body || {});
+  library.invalidate();
+  audit(req, "category.update", "category", row.id, req.body);
+  res.json({ category: taxonomy.dto(row) });
+});
+
+router.delete("/admin/asset-categories/:id", (req, res) => {
+  taxonomy.remove(req.params.id, library.categoryUsage);
+  library.invalidate();
+  audit(req, "category.delete", "category", req.params.id);
   res.json({ ok: true });
 });
 

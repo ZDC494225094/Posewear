@@ -8,9 +8,11 @@ import * as v from "../lib/validate.js";
 
 export const router = express.Router();
 
+const viewerOf = (req) => ({ loggedIn: !!req.user, userId: req.user?.id ?? null });
+
 router.get("/public/config", (req, res) => {
   const cfg = settings.publicConfig();
-  const meta = library.meta({ loggedIn: !!req.user });
+  const meta = library.meta(viewerOf(req));
   res.json({ ...cfg, library: { ...cfg.library, poses: meta.pose.total, poseGroups: meta.pose.groups, outfits: meta.outfit.total } });
 });
 
@@ -34,7 +36,7 @@ router.get("/public/showcase", (req, res) => {
 
 // Home page data: featured works, plus random pose/outfit pairs for the hero.
 router.get("/public/home", (req, res) => {
-  const viewer = { loggedIn: !!req.user };
+  const viewer = viewerOf(req);
   const pairs = [];
   for (let i = 0; i < 4; i++) {
     const pose = library.random({ type: "pose", forAI: true, withPerson: true }, viewer);

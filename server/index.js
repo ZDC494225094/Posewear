@@ -17,6 +17,7 @@ import { router as authRouter } from "./routes/auth.js";
 import { router as meRouter } from "./routes/me.js";
 import { router as libraryRouter } from "./routes/library.js";
 import { router as studioRouter } from "./routes/studio.js";
+import { router as assetsRouter } from "./routes/assets.js";
 import { router as billingRouter, notifyRouter } from "./routes/billing.js";
 import { router as mediaRouter } from "./routes/media.js";
 import { router as adminRouter } from "./routes/admin.js";
@@ -59,7 +60,7 @@ app.use("/api", notifyRouter);
 app.use(express.json({ limit: "1mb" }));
 app.use(session);
 app.use("/api", csrf);
-app.use("/api", publicRouter, authRouter, meRouter, libraryRouter, studioRouter, billingRouter, adminRouter);
+app.use("/api", publicRouter, authRouter, meRouter, libraryRouter, studioRouter, assetsRouter, billingRouter, adminRouter);
 app.use("/api", notFoundApi);
 app.use("/media", mediaRouter);
 

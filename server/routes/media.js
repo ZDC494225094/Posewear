@@ -21,7 +21,9 @@ router.get("/library/:id/:variant", (req, res) => {
   if (!["thumb", "preview", "original"].includes(variant)) throw notFound();
   const asset = library.getAsset(id);
   const isAdmin = req.user?.role === "admin";
-  if (!asset || (!isAdmin && !library.visible(asset, { loggedIn: !!req.user }))) throw notFound("素材不存在");
+  if (!asset || (!isAdmin && !library.visible(asset, { loggedIn: !!req.user, userId: req.user?.id }))) {
+    throw notFound("素材不存在");
+  }
   if (variant === "original" && !isAdmin) {
     const policy = settings.get("library").originalDownload;
     if (policy === "disabled") throw forbidden("原图下载未开放", "DOWNLOAD_DISABLED");
@@ -29,8 +31,9 @@ router.get("/library/:id/:variant", (req, res) => {
   }
   const file = library.assetFile(asset, variant);
   const ext = (file || "").split(".").pop();
+  // Users' assets can turn private at any time, so shared caches never keep them.
   send(res, file, {
-    cacheControl: variant === "original" ? "private, max-age=3600" : "public, max-age=604800",
+    cacheControl: variant === "original" || asset.owner_id ? "private, max-age=3600" : "public, max-age=604800",
     downloadName: variant === "original" && req.query.download ? `${asset.id}.${ext}` : undefined
   });
 });
