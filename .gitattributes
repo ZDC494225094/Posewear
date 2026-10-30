@@ -1,0 +1,9 @@
+# Normalize text files to LF in the repository and in checkouts, so the
+# Dockerfile and shell snippets work the same on Windows, macOS and Linux.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.woff2 binary
+*.ico binary

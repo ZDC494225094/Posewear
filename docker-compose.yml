@@ -1,0 +1,18 @@
+services:
+  posewear:
+    build: .
+    image: posewear-studio:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+      LIBRARY_DIR: /library
+      HOST: 0.0.0.0
+      PORT: 3000
+      # 宿主机上的反向代理经 Docker 网桥访问容器，需信任内网地址才能拿到真实 IP 和 HTTPS 标记
+      TRUST_PROXY: "loopback, uniquelocal"
+    ports:
+      - "127.0.0.1:3000:3000"   # 只监听本机，由 Nginx/Caddy 反向代理并提供 HTTPS
+    volumes:
+      - ./storage:/data          # 数据库、用户上传、生成结果——务必定期备份
+      - ./library:/library:ro    # 素材图片（包含 pose/ 和 costume/），见 README「导入素材」
