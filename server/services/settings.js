@@ -9,8 +9,8 @@ export const DEFAULTS = {
   site: {
     name: "姿衣 PoseWear",
     tagline: "挑一个姿势，选一套衣服，AI 帮你拍出来。",
-    description: "从姿势库和服装库里各挑一张参考图，可选上传人物照片，gpt-image-2 会把它们合成一张完整的人物成片。",
-    keywords: "AI写真,AI换装,姿势参考,服装参考,gpt-image-2,AI绘图",
+    description: "从姿势库和服装库里各挑一张参考图，可选上传人物照片，AI 会把它们合成一张完整的人物成片。",
+    keywords: "AI写真,AI换装,姿势参考,服装参考,AI绘图",
     announcement: "",
     announcementLevel: "info",
     supportContact: "",

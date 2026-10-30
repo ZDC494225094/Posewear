@@ -37,7 +37,7 @@ function heroStage(pairs, featured) {
         h("div.formula-frame", result
           ? h("img", { src: result.thumb, alt: "AI 成片示例" })
           : h("div.result-placeholder", tile("sparkle", "orange", "lg"), h("span", "AI 成片"))),
-        h("figcaption", tile("sparkle", "orange"), h("span", "gpt-image-2 生成")))),
+        h("figcaption", tile("sparkle", "orange"), h("span", "AI 成片")))),
     pairs.length ? h("div.hero-stage-foot",
       pairs.length > 1 ? h("button.btn.btn-white", { type: "button", onclick: () => { index += 1; show(); } }, cicon("shuffle", "purple"), "换一组") : null,
       h("button.btn.btn-primary", { type: "button", onclick: useIt }, cicon("sparkle", "yellow"), "用这组开始")) : null);
@@ -142,7 +142,6 @@ export async function render() {
   const hero = h("section.hero.ambient",
     h("div.wrap",
       h("div.hero-inner",
-        h("span.hero-badge.glass", tile("sparkle", "orange"), "由 gpt-image-2 驱动"),
         h("h1.hero-title", h("span", "选个姿势，"), h("span", "挑套衣服。"), h("br"), h("span", "AI 帮你拍出来。")),
         h("p.hero-lead", cfg.site.description),
         h("div.hero-cta",
