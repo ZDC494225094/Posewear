@@ -137,6 +137,20 @@ test("admin pose assets are 900x1200 line art and can be extended with more angl
   assert.equal(side.assets[0].angle.key, "横");
 });
 
+test("an unlisted admin draft can be extended, and its new angles stay unlisted", async () => {
+  const standing = minorOf("pose", "全身1人・標準系", "立ち");
+  const res = await admin.post("/api/admin/asset-jobs", { type: "pose", categoryId: standing.id, angle: "正面", publish: false });
+  assert.equal(res.status, 201, JSON.stringify(res.data));
+  const draft = (await pollJob(admin, "/api/admin", res.data.items[0].id)).assets[0];
+  assert.equal(draft.enabled, false);
+  const more = await admin.post("/api/admin/asset-jobs", { sourceAssetId: draft.id, angles: ["上から"] });
+  assert.equal(more.status, 201, JSON.stringify(more.data));
+  const job = await pollJob(admin, "/api/admin", more.data.items[0].id);
+  assert.equal(job.status, "succeeded", JSON.stringify(job));
+  assert.equal(job.assets[0].enabled, false);
+  assert.equal(job.assets[0].groupKey, draft.groupKey);
+});
+
 let alicePose;
 
 test("users pay to generate private assets that only they can see", async () => {

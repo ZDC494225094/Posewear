@@ -145,7 +145,8 @@ export function ownerDto(row) {
     ...dto(row),
     visibility: row.visibility, review: row.review, reviewNote: row.review_note,
     earned: row.earned, useCount: row.use_count, enabled: !!row.enabled,
-    createdAt: row.created_at, publishedAt: row.published_at
+    createdAt: row.created_at, publishedAt: row.published_at,
+    groupAngles: row.type === "pose" ? groupAngles(row.group_key) : undefined
   };
 }
 

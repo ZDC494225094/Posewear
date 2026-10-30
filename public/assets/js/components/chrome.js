@@ -40,6 +40,7 @@ function userMenu(user) {
   const menu = h("div.user-menu-list", { role: "menu", hidden: true },
     h("div.user-menu-head", h("strong", user.nickname), h("span.faint.small", user.email)),
     item("/works", "我的作品", "photos", "blue"),
+    item("/my-assets", "我的素材", "wand", "purple"),
     item("/account", "账户与点数", "person", "green"),
     item("/pricing", "充值", "gem", "orange"),
     user.role === "admin" ? item("/admin", "管理后台", "sliders", "gray") : null,

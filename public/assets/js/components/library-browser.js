@@ -1,5 +1,6 @@
 import { h, icon, replace } from "../core/dom.js";
 import { api } from "../core/api.js";
+import { store } from "../core/store.js";
 import { label, number } from "../core/format.js";
 import { toastError, emptyState } from "../core/ui.js";
 import { selectMenu } from "../core/select.js";
@@ -10,7 +11,8 @@ import { selectMenu } from "../core/select.js";
 //   mode "picker": card click -> onSelect(asset) (poses first ask for an angle)
 
 let metaCache = null;
-export async function libraryMeta() {
+export async function libraryMeta({ fresh = false } = {}) {
+  if (fresh) metaCache = null;
   if (!metaCache) metaCache = api.get("/api/library/meta").catch((err) => { metaCache = null; throw err; });
   return metaCache;
 }
@@ -21,10 +23,15 @@ export function usableNote(asset, withPerson) {
   return "";
 }
 
+// Credits the signed-in user pays to use someone else's shared asset.
+export const assetFee = (asset) => (asset?.price && asset.owner?.id !== store.user?.id ? asset.price : 0);
+
+const EMPTY = { series: "", category: "", angle: "", q: "", origin: "", license: "", view: "group" };
+
 export function libraryBrowser({ type = "pose", mode = "page", withPerson = false, filters: initial = {}, onSelect, onOpen, onFiltersChange }) {
   const state = {
     type,
-    filters: { series: "", category: "", angle: "", q: "", view: "group", ...initial },
+    filters: { ...EMPTY, ...initial },
     page: 1, items: [], total: 0, loading: false, token: 0
   };
   const PAGE = mode === "picker" ? 36 : 48;
@@ -50,6 +57,31 @@ export function libraryBrowser({ type = "pose", mode = "page", withPerson = fals
       options: [{ value: "", text: placeholder }, ...options], onChange: onchange }).node;
   }
 
+  // 平台 / 用户共享 / 我的, shown only when there is something to tell apart.
+  function originSelect(origins) {
+    const options = [{ value: "platform", text: "平台素材", note: number(origins.platform) }];
+    if (origins.user) options.push({ value: "user", text: "用户共享", note: number(origins.user) });
+    if (store.user && origins.mine) options.push({ value: "mine", text: "我的素材", note: number(origins.mine) });
+    if (options.length < 2 && !state.filters.origin) return null;
+    return select("origin", state.filters.origin, options, "全部来源", (origin) => setFilter({ origin }));
+  }
+
+  function licenseSelect(origins) {
+    if (!origins.commercial && !state.filters.license) return null;
+    return select("license", state.filters.license,
+      [{ value: "commercial", text: "可商用", note: number(origins.commercial) }, { value: "noncommercial", text: "非商用" }],
+      "全部授权", (license) => setFilter({ license }));
+  }
+
+  function seriesChips(list, ariaLabel, countOf) {
+    const f = state.filters;
+    return h("div.chips.lib-series", { role: "group", "aria-label": ariaLabel },
+      [{ key: "", zh: "全部" }, ...list].map((s) =>
+        h("button.chip", { type: "button", "aria-pressed": String(f.series === s.key),
+          onclick: () => setFilter({ series: s.key, category: "" }) },
+          s.key ? label(s) : "全部", s.key ? h("span.chip-note", number(countOf(s))) : null)));
+  }
+
   function renderFilters() {
     if (!meta) return;
     const f = state.filters;
@@ -62,33 +94,47 @@ export function libraryBrowser({ type = "pose", mode = "page", withPerson = fals
           const q = e.target.value;
           searchTimer = setTimeout(() => setFilter({ q }, { reload: true }), 280);
         } }));
+    const m = state.type === "pose" ? meta.pose : meta.outfit;
+    const cats = m.categories.filter((c) => !f.series || c.series === f.series);
+    const categoryOptions = cats.map((c) => ({ value: c.key, text: label(c), note: number(c.count) }));
     if (state.type === "pose") {
-      const seriesChips = h("div.chips.lib-series", { role: "group", "aria-label": "姿势系列" },
-        [{ key: "", zh: "全部" }, ...meta.pose.series].map((s) =>
-          h("button.chip", { type: "button", "aria-pressed": String(f.series === s.key),
-            onclick: () => setFilter({ series: s.key, category: "" }) },
-            s.key ? label(s) : "全部", s.key ? h("span.chip-note", number(s.count)) : null)));
-      const cats = meta.pose.categories.filter((c) => !f.series || c.series === f.series);
-      const uniqueCats = [...new Map(cats.map((c) => [c.key, c])).values()];
+      const uniqueCats = [...new Map(categoryOptions.map((c) => [c.value, c])).values()];
       replace(filterBar,
-        seriesChips,
+        seriesChips(m.series, "姿势系列", (s) => s.count),
         h("div.lib-filter-row",
           search,
-          select("category", f.category, uniqueCats.map((c) => ({ value: c.key, text: label(c) })), "全部分类",
-            (category) => setFilter({ category })),
-          select("angle", f.angle, meta.pose.angles.map((a) => ({ value: a.key, text: label(a) })), "全部角度",
+          select("category", f.category, uniqueCats, "全部分类", (category) => setFilter({ category })),
+          select("angle", f.angle, m.angles.map((a) => ({ value: a.key, text: label(a) })), "全部角度",
             (angle) => setFilter({ angle })),
+          originSelect(m.origins),
+          licenseSelect(m.origins),
           mode === "page" ? select("view", f.view === "image" ? "image" : "", [{ value: "image", text: "逐张显示" }], "按姿势分组",
             (view) => setFilter({ view: view || "group" })) : null));
     } else {
+      // Outfits: 大类 as chips, 小类 in a menu grouped by 大类.
+      const grouped = f.series ? categoryOptions : m.series.flatMap((s) => [
+        { group: label(s) }, ...m.categories.filter((c) => c.series === s.key).map((c) => ({ value: c.key, text: label(c), note: number(c.count) }))
+      ]);
       replace(filterBar,
-        h("div.chips.lib-series", { role: "group", "aria-label": "服装分类" },
-          [{ key: "", zh: "全部" }, ...meta.outfit.categories].map((c) =>
-            h("button.chip", { type: "button", "aria-pressed": String(f.category === c.key),
-              onclick: () => setFilter({ category: c.key }) },
-              c.key ? label(c) : "全部", c.key ? h("span.chip-note", number(c.count)) : null))),
-        h("div.lib-filter-row", search));
+        seriesChips(m.series, "服装大类", (s) => s.count),
+        h("div.lib-filter-row",
+          search,
+          select("category", f.category, grouped, f.series ? "全部小类" : "全部分类", (category) => {
+            const owner = category && !f.series ? m.categories.find((c) => c.key === category)?.series || "" : f.series;
+            setFilter({ category, series: owner });
+          }),
+          originSelect(m.origins),
+          licenseSelect(m.origins)));
     }
+  }
+
+  function badges(asset) {
+    const out = [];
+    if (asset.owner) out.push(h("span.asset-owner", `@${asset.owner.name}`));
+    const fee = assetFee(asset);
+    if (fee) out.push(h("span.asset-price", `${fee} 点`));
+    if (asset.license === "commercial") out.push(h("span.asset-license", "可商用"));
+    return out;
   }
 
   function card(item) {
@@ -96,7 +142,7 @@ export function libraryBrowser({ type = "pose", mode = "page", withPerson = fals
     const asset = isGroup ? item.cover : item;
     const note = mode === "picker" ? usableNote(asset, withPerson) : "";
     const angles = isGroup ? item.images.length : 0;
-    const name = state.type === "pose" ? label(asset.name) : asset.id;
+    const name = state.type === "pose" || asset.generated ? label(asset.name) : asset.id;
     const tags = state.type === "pose"
       ? [label(asset.category), angles > 1 ? `${angles} 个角度` : label(asset.angle)]
       : [label(asset.category)];
@@ -106,7 +152,7 @@ export function libraryBrowser({ type = "pose", mode = "page", withPerson = fals
         h("div.asset-img", h("img", { src: asset.thumb, alt: "", loading: "lazy", decoding: "async" })),
         h("div.asset-info",
           h("div.asset-name", name),
-          h("div.asset-meta", tags.filter(Boolean).map((m) => h("span", m))))),
+          h("div.asset-meta", tags.filter(Boolean).map((m) => h("span", m)), badges(asset)))),
       note ? h("span.asset-flag", note) : null);
   }
 
@@ -145,9 +191,10 @@ export function libraryBrowser({ type = "pose", mode = "page", withPerson = fals
     try {
       const f = state.filters;
       const path = state.type === "pose" ? "/api/library/poses" : "/api/library/outfits";
+      const common = { series: f.series, category: f.category, q: f.q, origin: f.origin, license: f.license, page: state.page, size: PAGE };
       const query = state.type === "pose"
-        ? { series: f.series, category: f.category, angle: f.angle, q: f.q, view: mode === "picker" ? "group" : f.view, page: state.page, size: PAGE }
-        : { category: f.category, q: f.q, page: state.page, size: PAGE };
+        ? { ...common, angle: f.angle, view: mode === "picker" ? "group" : f.view }
+        : common;
       const data = await api.get(path, query);
       if (token !== state.token) return;
       state.total = data.total;
@@ -156,7 +203,7 @@ export function libraryBrowser({ type = "pose", mode = "page", withPerson = fals
       grid.append(...data.items.map(card));
       if (!state.items.length) {
         grid.replaceChildren(emptyState({ title: "没有找到匹配的素材", text: "换个关键词，或清除筛选条件试试。",
-          action: h("button.btn", { type: "button", onclick: () => setFilter({ series: "", category: "", angle: "", q: "" }) }, "清除筛选") }));
+          action: h("button.btn", { type: "button", onclick: () => setFilter({ ...EMPTY, view: state.filters.view }) }, "清除筛选") }));
       }
       const unit = state.type === "pose" && (mode === "picker" || f.view !== "image") ? "组姿势" : state.type === "pose" ? "张姿势图" : "套服装";
       summary.textContent = `共 ${number(state.total)} ${unit}`;
@@ -179,7 +226,7 @@ export function libraryBrowser({ type = "pose", mode = "page", withPerson = fals
     node,
     setType(next, filters = {}) {
       state.type = next;
-      state.filters = { series: "", category: "", angle: "", q: "", view: "group", ...filters };
+      state.filters = { ...EMPTY, ...filters };
       grid.className = `lib-grid ${next === "outfit" ? "is-outfit" : "is-pose"}`;
       renderFilters();
       load(true);

@@ -19,6 +19,8 @@ const NAV = [
   ]],
   ["内容", [
     ["/admin/assets", "素材库", "hanger", "teal", () => import("./pages/assets.js")],
+    ["/admin/asset-categories", "素材分类", "folder", "blue", () => import("./pages/asset-categories.js")],
+    ["/admin/asset-settings", "素材生成与分成", "coins", "yellow", () => import("./pages/asset-settings.js")],
     ["/admin/safety", "内容安全", "shield", "green", () => import("./pages/safety.js")]
   ]],
   ["配置", [
@@ -80,9 +82,12 @@ async function boot() {
   // Pending moderation work shows as a badge in the nav.
   try {
     const o = await api.get("/api/admin/overview", { days: 7 });
-    const n = o.pendingReports + o.pendingReview;
-    const badge = badges.get("/admin/reports");
-    if (n && badge) { badge.textContent = String(n); badge.hidden = false; }
+    const show = (href, n) => {
+      const badge = badges.get(href);
+      if (n && badge) { badge.textContent = String(n); badge.hidden = false; }
+    };
+    show("/admin/reports", o.pendingReports + o.pendingReview);
+    show("/admin/assets", o.pendingAssets);
   } catch { /* badge is optional */ }
 }
 

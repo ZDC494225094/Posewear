@@ -303,7 +303,7 @@ export function adminList({ status, kind, userId, q, isPublic, offset, size }) {
       usage: r.usage ? JSON.parse(r.usage) : null, promptFinal: r.prompt_final,
       deleted: !!r.deleted_at, clientIp: r.client_ip, hasPerson: !!r.person_upload_id,
       personUploadId: r.person_upload_id, outfitUploadId: r.outfit_upload_id,
-      kind: r.kind, refUploadId: r.ref_upload_id, assetJob: r.kind === "asset" ? JSON.parse(r.params || "{}") : null
+      kind: r.kind, refUploadId: r.ref_upload_id, sourceAssetId: r.source_asset_id, assetJob: r.kind === "asset" ? JSON.parse(r.params || "{}") : null
     }))
   };
 }

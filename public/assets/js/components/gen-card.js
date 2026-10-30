@@ -168,6 +168,8 @@ export function openViewer(gen, start = 0, { onChange } = {}) {
         h("p.viewer-title", settingsText(gen)),
         gen.prompt ? h("p.small.muted", gen.prompt) : null,
         refThumbs(gen),
+        gen.refs?.license ? h("p.small.muted", gen.refs.license === "commercial"
+          ? "用到的素材均可商用。" : "用到了非商用素材，这张图仅限个人非商业用途。") : null,
         h("p.small.faint", `${item.img.width} × ${item.img.height} · ${item.img.format.toUpperCase()}`),
         h("div.viewer-actions",
           h("a.btn.btn-primary.btn-block", { href: item.img.download, download: "", "data-native": "" }, cicon("download", "green"), "下载原图"),

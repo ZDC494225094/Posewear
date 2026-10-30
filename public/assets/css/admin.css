@@ -170,8 +170,8 @@ body.admin #main { padding-bottom: 60px; min-height: 100vh; }
 
 /* ---------- assets */
 .a-tabs-row { display: flex; align-items: center; justify-content: space-between; gap: 12px 20px; flex-wrap: wrap; margin-bottom: 14px; }
-.a-type-tabs { width: 260px; }
-.a-type-tabs button { min-height: 34px; font-size: 14px; }
+.a-type-tabs { width: max-content; min-width: 260px; max-width: 100%; }
+.a-type-tabs button { min-height: 34px; padding: 0 14px; font-size: 14px; }
 .a-rating-summary { display: flex; gap: 18px; flex-wrap: wrap; color: var(--label-2); }
 .a-rating-summary strong { color: var(--label); font-weight: 600; }
 .a-bulk { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; padding: 10px 12px; border-radius: 14px; background: var(--fill-2); }
@@ -185,6 +185,17 @@ body.admin #main { padding-bottom: 60px; min-height: 100vh; }
 .a-asset-name { padding: 0 9px; font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .a-asset-tags { display: flex; gap: 4px; flex-wrap: wrap; padding: 0 9px; }
 .a-asset-preview { max-height: 360px; width: auto; margin: 0 auto; border-radius: 12px; background: #fff; }
+.a-preview-btn { display: block; width: 100%; padding: 12px; border: 0; border-radius: 16px; background: var(--fill-2); cursor: zoom-in; }
+.a-preview-btn:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.a-tabs-note { display: flex; align-items: center; gap: 10px 16px; flex-wrap: wrap; }
+.a-review { display: grid; gap: 10px; padding: 12px 14px; border-radius: 14px; background: rgba(255, 149, 0, .1); color: #7a4100; }
+.a-review-row { display: flex; gap: 8px; align-items: center; }
+.a-review-row .input { flex: 1; min-width: 0; background-color: var(--surface); }
+.a-file { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--fill-2); }
+.a-cats { display: grid; gap: 16px; }
+.a-cat { margin-bottom: 0; }
+.a-cat-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 10px; }
+.a-cat-head h2 { font-size: 17px; letter-spacing: -0.02em; margin-bottom: 2px; }
 .batch-list { display: grid; gap: 6px; }
 .batch { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 9px 12px; border-radius: 12px; background: var(--fill-2); }
 .batch .btn { margin-left: auto; }

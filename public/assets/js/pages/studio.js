@@ -4,7 +4,7 @@ import { store, draft } from "../core/store.js";
 import { modal, toast, toastError, busy, confirmDialog } from "../core/ui.js";
 import { label, number } from "../core/format.js";
 import { navigate } from "../core/nav.js";
-import { libraryBrowser, usableNote } from "../components/library-browser.js";
+import { libraryBrowser, usableNote, assetFee } from "../components/library-browser.js";
 import { genCard, jobWatcher } from "../components/gen-card.js";
 import { openBoardDialog } from "../components/board.js";
 
@@ -57,13 +57,13 @@ export async function render(ctx) {
     return h("button.btn", { type: "button", title: text, "aria-label": text, onclick }, cicon(iconName, color, 14));
   }
 
-  function ref({ key, title, optional, iconName, color, filled, image, code, note, emptyText, onPick, tools }) {
+  function ref({ key, title, optional, iconName, color, filled, image, code, note, fee, emptyText, onPick, tools }) {
     return h("div.ref", { class: `is-${key}` },
       h("div.ref-label", title, code ? h("span.code.num", code) : optional ? h("span.code", "可选") : null),
       h("button.ref-frame", { type: "button", onclick: onPick, "aria-label": filled ? `更换${title}` : emptyText },
         filled ? h("img", { src: image, alt: title, decoding: "async" })
           : h("div.ref-empty", tile(iconName, color), h("span", emptyText))),
-      note ? h("p.ref-note", note) : null,
+      note ? h("p.ref-note", note) : fee ? h("p.ref-fee", `使用费 ${fee} 点`) : null,
       h("div.ref-tools", tools.filter(Boolean)));
   }
 
@@ -74,7 +74,7 @@ export async function render(ctx) {
     replace(refsEl,
       ref({
         key: "pose", title: "姿势", iconName: "pose", color: "purple", filled: !!state.pose,
-        image: state.pose?.preview, code: state.pose?.code, note: poseNote, emptyText: "选择姿势",
+        image: state.pose?.preview, code: state.pose?.code, note: poseNote, fee: assetFee(state.pose), emptyText: "选择姿势",
         onPick: () => openPicker("pose"),
         tools: [
           toolButton("shuffle", "purple", "随机姿势", (e) => busy(e.currentTarget, () => randomize("pose"))),
@@ -84,7 +84,7 @@ export async function render(ctx) {
       ref({
         key: "outfit", title: "服装", iconName: "shirt", color: "pink", filled: !!(state.outfit || state.outfitUpload),
         image: state.outfit?.preview || state.outfitUpload?.url, code: state.outfit?.id || (state.outfitUpload ? "上传" : ""),
-        note: outfitNote, emptyText: "选择服装", onPick: () => openPicker("outfit"),
+        note: outfitNote, fee: assetFee(state.outfit), emptyText: "选择服装", onPick: () => openPicker("outfit"),
         tools: [
           toolButton("shuffle", "purple", "随机服装", (e) => busy(e.currentTarget, () => randomize("outfit"))),
           cfg.allowOutfitUpload ? toolButton("upload", "blue", "上传服装图", (e) => uploadOutfit(e.currentTarget)) : null,
@@ -292,8 +292,12 @@ export async function render(ctx) {
     return "";
   }
 
+  // Shared assets from other users add their price once per job.
+  const fees = () => assetFee(state.pose) + assetFee(state.outfit);
+
   function updateAction() {
-    const cost = unit() * state.n;
+    const fee = fees();
+    const cost = unit() * state.n + fee;
     const reason = blocker();
     const user = store.user;
     let button;
@@ -308,7 +312,7 @@ export async function render(ctx) {
     replace(actionEl,
       button,
       reason ? h("p.action-reason", { role: "status" }, reason)
-        : h("p.action-balance", user ? `余额 ${number(user.credits)} 点 · 失败自动退回`
+        : h("p.action-balance", user ? `余额 ${number(user.credits)} 点${fee ? ` · 含素材使用费 ${fee} 点` : ""} · 失败自动退回`
           : store.config.auth.signupBonus ? `新用户注册送 ${store.config.auth.signupBonus} 点` : ""));
   }
 

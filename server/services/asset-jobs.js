@@ -80,7 +80,8 @@ function validate(user, input, { admin }) {
     if (!source || source.type !== "pose") throw badRequest("SOURCE_UNAVAILABLE", "原姿势不存在");
     const allowed = admin ? source.root === "custom" : source.owner_id === user.id;
     if (!allowed) throw forbidden(admin ? "导入的姿势已有完整角度" : "只能为自己的姿势补全角度", "SOURCE_NOT_ALLOWED");
-    if (!library.usableForAI(source)) throw badRequest("SOURCE_UNAVAILABLE", "这个姿势不能用于 AI 生成");
+    // Admins may extend a draft that is not listed yet; the rating rules still apply.
+    if (!library.usableForAI(admin ? { ...source, enabled: 1 } : source)) throw badRequest("SOURCE_UNAVAILABLE", "这个姿势不能用于 AI 生成");
     const taken = new Set(library.groupAngles(source.group_key));
     const requested = [...new Set((Array.isArray(input.angles) ? input.angles : [input.angle]).map(String))];
     const angles = requested.filter((a) => ANGLE_KEYS.includes(a) && !taken.has(a));
@@ -153,7 +154,8 @@ export function createJobs(user, input, { admin = false, ip = null } = {}) {
       const params = {
         type: r.type, angle: step.angle, description: r.description, categoryId: r.minor?.id ?? null,
         categoryLabel, columns, name, license, rating: source ? source.rating : r.minor.rating,
-        platform: admin, publish: admin ? input.publish !== false : true,
+        // New angles are listed exactly when the pose they extend is.
+        platform: admin, publish: source ? !!source.enabled : admin ? input.publish !== false : true,
         groupKey: source?.group_key || null,
         sortBase: source ? source.sort - Math.max(0, ANGLE_KEYS.indexOf(source.angle)) : null,
         sourceName: source ? name : null, assetIds: []
