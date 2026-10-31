@@ -41,7 +41,7 @@ export function overview({ days = 30 } = {}) {
     FROM orders WHERE status = 'paid'`).get(today, since);
   // Net credits consumed: usage fees paid on to asset owners are not spent.
   const spent = db.prepare(`SELECT COALESCE(-SUM(delta), 0) AS n FROM credit_ledger
-    WHERE kind IN ('generation', 'asset_generation', 'asset_income', 'refund') AND created_at >= ?`).get(since).n;
+    WHERE kind IN ('generation', 'asset_generation', 'asset_income', 'wedding', 'refund') AND created_at >= ?`).get(since).n;
   const outstanding = db.prepare("SELECT COALESCE(SUM(credits), 0) AS n FROM users").get().n;
 
   const genDaily = db.prepare(`SELECT ${sqlLocalDate("created_at")} AS day, COUNT(*) AS total,

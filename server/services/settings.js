@@ -214,6 +214,51 @@ export const DEFAULTS = {
       "下から": "low-angle view, looking up at the figure from below"
     }
   },
+  // 婚纱影楼: packages (sets) priced by photo count, the shot list every look
+  // is shot with (a package takes the first N), and the wedding prompt lines.
+  wedding: {
+    enabled: true,
+    quality: "medium",
+    tier: "hd",
+    extraPhotoPrice: 50,
+    retakePrice: 40,
+    freeRetries: 3,
+    retentionDays: 30,
+    packages: [
+      { key: "light", name: "轻享", looks: 1, shots: 6, retakes: 2, price: 299, badge: "", description: "一套造型，先看看效果" },
+      { key: "classic", name: "经典", looks: 3, shots: 6, retakes: 5, price: 799, badge: "最受欢迎", description: "影棚、外景、中式各一套" },
+      { key: "premium", name: "臻选", looks: 5, shots: 8, retakes: 10, price: 1599, badge: "", description: "五套造型、40 张，一次拍全" }
+    ],
+    shots: [
+      { key: "couple-full", name: "全身合影", people: "couple", ratio: "2:3", prompt: "full-length portrait of the couple standing close together, the groom's arm around the bride's waist, both looking at the camera with relaxed, natural smiles" },
+      { key: "couple-walk", name: "牵手漫步", people: "couple", ratio: "3:2", prompt: "the couple walking hand in hand, captured mid-step from a few metres away, candid and natural, the dress moving slightly" },
+      { key: "bride-solo", name: "新娘独照", people: "bride", ratio: "2:3", prompt: "the bride alone, three-quarter length, holding a small bouquet and glancing over her shoulder towards the camera" },
+      { key: "couple-close", name: "半身互动", people: "couple", ratio: "3:4", prompt: "waist-up shot of the couple facing each other with foreheads gently touching and eyes closed, tender and tasteful" },
+      { key: "groom-solo", name: "新郎独照", people: "groom", ratio: "2:3", prompt: "the groom alone, half-length, adjusting his cuff, with a confident and gentle expression" },
+      { key: "wide", name: "环境大景", people: "couple", ratio: "3:2", prompt: "wide environmental shot, the couple small in the frame and facing each other, the location filling the picture, cinematic composition" },
+      { key: "gaze", name: "深情对视", people: "couple", ratio: "3:4", prompt: "the couple gazing into each other's eyes, the bride's hand resting on the groom's chest, soft smiles" },
+      { key: "back", name: "背影", people: "couple", ratio: "2:3", prompt: "seen from behind, the couple standing side by side and looking out at the view, the veil or skirt flowing" },
+      { key: "rings", name: "对戒特写", people: "couple", ratio: "1:1", prompt: "close-up of the couple's hands together showing their wedding rings, shallow depth of field, the outfits softly blurred behind" }
+    ],
+    prompt: {
+      intro: "Create one real-looking wedding photograph from the reference images below. It must look like a photo taken by a professional wedding photographer on a real shoot, not a digital painting or a 3D render.",
+      bride: "{images} the BRIDE: the same real woman from different angles. Keep her face exactly as in these photos (face shape, eyes, eyebrows, nose, lips, skin tone, moles and hairline) so that she is instantly recognisable. Ignore her clothes, hairstyle and background in these photos.",
+      groom: "{images} the GROOM: the same real man from different angles. Keep his face exactly as in these photos (face shape, eyes, eyebrows, nose, lips, skin tone and hairline) so that he is instantly recognisable. Ignore his clothes and background in these photos.",
+      virtualCouple: "The couple is a young East Asian bride and groom in their late twenties with natural, everyday good looks; they do not resemble any real or famous person.",
+      brideOutfit: "Image {n} is the BRIDE'S OUTFIT ({name}): dress her in exactly this, keeping the silhouette, fabric, lace and details. Ignore how it is displayed in the reference.",
+      groomOutfit: "Image {n} is the GROOM'S OUTFIT ({name}): dress him in exactly this, keeping the cut, fabric and details. Ignore how it is displayed in the reference.",
+      outfitText: "The {role} wears {value}.",
+      scene: "Image {n} is the LOCATION: place the couple in this exact place, keeping its setting, architecture or landscape and mood. Leave out any other people.",
+      sceneText: "Location: {value}.",
+      styling: "Styling: {value}.",
+      shot: "Shot: {value}.",
+      light: "Light and colour: {value}.",
+      camera: "Camera: full-frame camera with a fast prime lens (35mm f/1.4 for wide shots, 85mm f/1.4 for portraits), natural depth of field and accurate perspective.",
+      realism: "Make it indistinguishable from a real, lightly retouched wedding photo: natural skin texture with visible pores, natural asymmetry, real fabric folds and creases, physically correct light and shadows, true-to-life skin tones. No plastic skin, no beauty filter, no over-sharpening, no extra or distorted fingers.",
+      safety: "Both are adults. Romantic and tasteful; no nudity.",
+      outro: "Output a single photograph in the requested frame, not a collage, contact sheet or split image. No text, captions, logos, borders or watermarks."
+    }
+  },
   payment: {
     orderExpireMinutes: 30,
     mock: { enabled: false },
@@ -342,6 +387,40 @@ function presetList(list, fallback) {
 }
 
 const RATIOS = ["2:3", "3:4", "1:1", "4:3", "3:2", "9:16", "16:9"];
+
+function weddingPackages(list, fallback) {
+  if (!Array.isArray(list)) return fallback;
+  const seen = new Set();
+  const out = [];
+  for (const p of list.slice(0, 8)) {
+    const key = text(p?.key).trim().toLowerCase();
+    if (!ID.test(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      key, name: text(p.name, key, 12).trim() || key,
+      looks: intIn(p.looks, 1, 8, 1), shots: intIn(p.shots, 1, 12, 6), retakes: intIn(p.retakes, 0, 100, 0),
+      price: intIn(p.price, 0, 1000000, 0), badge: text(p.badge, "", 8).trim(), description: text(p.description, "", 60).trim()
+    });
+  }
+  return out.length ? out : fallback;
+}
+
+function weddingShots(list, fallback) {
+  if (!Array.isArray(list)) return fallback;
+  const seen = new Set();
+  const out = [];
+  for (const shot of list.slice(0, 20)) {
+    const key = text(shot?.key).trim().toLowerCase();
+    if (!ID.test(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      key, name: text(shot.name, key, 10).trim() || key,
+      people: pick(shot.people, ["couple", "bride", "groom"], "couple"), ratio: pick(shot.ratio, RATIOS, "2:3"),
+      prompt: text(shot.prompt, "", 400).trim()
+    });
+  }
+  return out.length ? out : fallback;
+}
 
 function sanitize(group, v) {
   const d = DEFAULTS[group];
@@ -489,6 +568,22 @@ function sanitize(group, v) {
         angles
       };
     }
+    case "wedding": {
+      const prompt = {};
+      for (const key of Object.keys(d.prompt)) prompt[key] = text(v.prompt?.[key], d.prompt[key], 1500).trim() || d.prompt[key];
+      return {
+        enabled: flag(v.enabled, d.enabled),
+        quality: pick(v.quality, ["low", "medium", "high"], d.quality),
+        tier: pick(v.tier, ["standard", "hd"], d.tier),
+        extraPhotoPrice: intIn(v.extraPhotoPrice, 0, 100000, d.extraPhotoPrice),
+        retakePrice: intIn(v.retakePrice, 0, 100000, d.retakePrice),
+        freeRetries: intIn(v.freeRetries, 0, 10, d.freeRetries),
+        retentionDays: intIn(v.retentionDays, 1, 365, d.retentionDays),
+        packages: weddingPackages(v.packages, d.packages),
+        shots: weddingShots(v.shots, d.shots),
+        prompt
+      };
+    }
     case "payment": {
       const a = v.alipay || {}, w = v.wechat || {};
       return {
@@ -571,6 +666,7 @@ export function publicConfig() {
     },
     payment: { providers },
     showcase: { enabled: safety.showcaseEnabled },
+    wedding: { enabled: get("wedding").enabled && gen.enabled },
     library: { originalDownload: library.originalDownload, showSuggestive: safety.showSuggestive },
     assets: {
       generation: assets.userGeneration && gen.enabled,

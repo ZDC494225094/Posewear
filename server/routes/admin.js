@@ -6,6 +6,7 @@ import * as library from "../services/library.js";
 import * as taxonomy from "../services/taxonomy.js";
 import * as assetJobs from "../services/asset-jobs.js";
 import * as uploads from "../services/uploads.js";
+import * as wedding from "../services/wedding.js";
 import * as generations from "../services/generations.js";
 import * as billing from "../services/billing.js";
 import * as credits from "../services/credits.js";
@@ -34,11 +35,11 @@ router.get("/admin/overview", (req, res) => {
 
 // ---------- settings
 
-const GROUPS = ["site", "auth", "generation", "prompt", "safety", "library", "assets", "payment", "mail", "legal"];
+const GROUPS = ["site", "auth", "generation", "prompt", "safety", "library", "assets", "wedding", "payment", "mail", "legal"];
 
 router.get("/admin/settings/:group", (req, res) => {
   const group = v.oneOf(req.params.group, "group", GROUPS);
-  const defaults = group === "prompt" || group === "assets" ? settings.DEFAULTS[group] : undefined;
+  const defaults = ["prompt", "assets", "wedding"].includes(group) ? settings.DEFAULTS[group] : undefined;
   res.json({ group, value: settings.getForAdmin(group), defaults });
 });
 
@@ -339,6 +340,61 @@ router.delete("/admin/assets/:id", (req, res) => {
 router.get("/admin/assets/:id/info", (req, res) => {
   res.json(assetJobs.assetInfo(req.params.id, { admin: true }));
 });
+
+// ---------- 婚纱影楼
+
+router.get("/admin/wedding/scenes", (req, res) => res.json({ items: wedding.adminScenes() }));
+
+router.post("/admin/wedding/scenes", (req, res) => {
+  const scene = wedding.saveScene(null, req.body || {});
+  audit(req, "wedding.scene_create", "wedding_scene", scene.id, { name: scene.name });
+  res.status(201).json({ scene });
+});
+
+router.put("/admin/wedding/scenes/:id", (req, res) => {
+  const scene = wedding.saveScene(req.params.id, req.body || {});
+  audit(req, "wedding.scene_update", "wedding_scene", scene.id, req.body);
+  res.json({ scene });
+});
+
+router.delete("/admin/wedding/scenes/:id", (req, res) => {
+  wedding.deleteScene(req.params.id);
+  audit(req, "wedding.scene_delete", "wedding_scene", req.params.id);
+  res.json({ ok: true });
+});
+
+router.post("/admin/wedding/scenes/:id/plate", (req, res) => {
+  const job = wedding.generatePlate(req.user, req.params.id, { ip: req.ip });
+  worker.kick();
+  res.status(201).json({ job });
+});
+
+router.post("/admin/wedding/scenes/:id/samples", (req, res) => {
+  const ids = wedding.generateSamples(req.user, req.params.id, req.body?.count, { ip: req.ip });
+  worker.kick();
+  res.status(201).json({ ids });
+});
+
+router.delete("/admin/wedding/samples/:imageId", (req, res) => {
+  wedding.deleteSample(req.params.imageId);
+  res.json({ ok: true });
+});
+
+// GET counts what is missing and estimates the cost; POST queues it.
+router.get("/admin/wedding/seed", (req, res) => res.json(wedding.seed(req.user, { dryRun: true })));
+router.post("/admin/wedding/seed", (req, res) => {
+  const result = wedding.seed(req.user, { dryRun: false, ip: req.ip });
+  worker.kick();
+  audit(req, "wedding.seed", "wedding", null, result);
+  res.status(201).json(result);
+});
+
+router.get("/admin/wedding/shoots", (req, res) => {
+  const { offset, size } = v.page(req.query, { defaultSize: 30, maxSize: 100 });
+  res.json(wedding.adminShoots({ offset, size }));
+});
+
+router.get("/admin/wedding/shoots/:id", (req, res) => res.json({ shoot: wedding.album(req.user, req.params.id, { admin: true }) }));
 
 // ---------- virtual persons
 

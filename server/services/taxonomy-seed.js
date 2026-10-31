@@ -357,6 +357,106 @@ export const ITEM_TREE = [
   }
 ];
 
+// Add a major category with its minors; an existing major only gets the
+// minors it lacks.
+export function addMajor(db, type, tree, now = Date.now()) {
+  const found = db.prepare("SELECT id FROM asset_categories WHERE type = ? AND key = ? AND parent_id IS NULL").get(type, tree.key);
+  if (!found) {
+    const last = db.prepare("SELECT COALESCE(MAX(sort), 0) AS s FROM asset_categories WHERE type = ? AND parent_id IS NULL").get(type).s;
+    db.prepare(`INSERT INTO asset_categories (type, parent_id, key, name_zh, name_en, hint, rating, gen_enabled, sort,
+      created_at, updated_at) VALUES (?, NULL, ?, ?, ?, '', 'general', 1, ?, ?, ?)`).run(type, tree.key, tree.zh, tree.en, last + 10, now, now);
+  }
+  return addMinors(db, type, tree.key, tree.children, now);
+}
+
+// 婚纱影楼 (migration 5): bridal and groom's wear as outfit majors, and a scene
+// major for the empty location plates the wedding scenes use.
+export const WEDDING_OUTFIT_TREES = [
+  {
+    key: "wedding-bride", zh: "新娘礼服", en: "Bridal wear",
+    children: [
+      ["a-line", "齐地婚纱", "A-line wedding gown", "floor-length A-line white wedding gown with a fitted lace bodice and a soft tulle skirt"],
+      ["cathedral", "拖尾婚纱", "Cathedral-train gown", "white wedding gown with a long cathedral train and a structured satin bodice"],
+      ["mermaid", "鱼尾婚纱", "Mermaid gown", "fitted mermaid wedding gown in ivory satin and lace, flaring below the knee"],
+      ["ball-gown", "公主蓬裙", "Ball gown", "strapless white ball gown with a sweetheart neckline and a full layered tulle skirt"],
+      ["light", "轻婚纱", "Light wedding dress", "light, flowing white chiffon wedding dress, ankle length, simple and airy"],
+      ["xiuhe", "秀禾服", "Xiuhe", "red Chinese xiuhe wedding outfit: embroidered jacket and pleated skirt with gold phoenix and peony motifs"],
+      ["longfeng", "龙凤褂", "Longfeng gua", "red and gold Chinese longfeng gua jacket and skirt, densely embroidered with dragons and phoenixes in gold thread"],
+      ["hanfu", "汉服婚服", "Hanfu wedding attire", "red Ming-style hanfu wedding attire: wide-sleeved robe, mamian skirt and gold embroidery"],
+      ["evening", "敬酒礼服", "Evening gown", "floor-length evening gown in champagne satin for the wedding reception"]
+    ]
+  },
+  {
+    key: "wedding-groom", zh: "新郎礼服", en: "Groom's wear",
+    children: [
+      ["black-tux", "黑色礼服西装", "Black tuxedo", "men's black tuxedo with satin peak lapels, white shirt and black bow tie"],
+      ["white-suit", "白色西装", "White suit", "men's ivory white two-piece suit with a white shirt and a light tie"],
+      ["three-piece", "三件套西装", "Three-piece suit", "men's navy three-piece suit with a waistcoat and a silk tie"],
+      ["tailcoat", "燕尾服", "Tailcoat", "men's black morning tailcoat with a grey waistcoat and striped trousers"],
+      ["chinese-groom", "中式礼服", "Chinese groom attire", "men's red Chinese wedding outfit: embroidered changshan robe with a magua jacket"],
+      ["hanfu-groom", "汉服婚服", "Hanfu groom attire", "men's red Ming-style hanfu wedding robe with gold embroidery and a black hat"],
+      ["linen", "休闲西装", "Linen suit", "men's light beige linen suit with an open-collar shirt, relaxed fit for beach or garden weddings"]
+    ]
+  }
+];
+export const WEDDING_PLATE_TREE = {
+  key: "wedding", zh: "婚礼场景", en: "Wedding locations",
+  children: [
+    ["studio", "影棚内景", "Studio sets", "a wedding photography studio set"],
+    ["outdoor", "外景", "Outdoor locations", "an outdoor wedding photography location"],
+    ["chinese", "中式", "Chinese-style locations", "a Chinese-style wedding location"]
+  ]
+};
+
+// Default wedding scenes: what users pick in the wizard. Prompts and light are
+// English for the model; bride/groom name the recommended outfit minor keys.
+//   [key, 名称, category, 介绍, prompt, light, bride, groom, hair, headpiece, makeup]
+export const WEDDING_SCENES = [
+  ["white-studio", "白色欧式影棚", "studio", "白墙拱窗、纱帘和木地板，干净明亮的韩式质感",
+    "a bright white European-style studio set with tall arched windows, sheer curtains and a pale wooden floor",
+    "soft diffused window light from one side, airy high-key exposure, clean pastel colour grading", "a-line", "black-tux", "low-bun", "veil", "korean"],
+  ["grey-backdrop", "简约纯色棚拍", "studio", "暖灰色无缝背景，经典正式的棚拍婚纱照",
+    "a seamless warm-grey studio backdrop with a soft gradient",
+    "large softbox key light with gentle fill, soft controlled shadows, polished studio look", "ball-gown", "three-piece", "high-bun", "tiara", "natural"],
+  ["vintage-room", "复古胶片房间", "studio", "复古家具和暖色台灯，带胶片颗粒的老电影感",
+    "a vintage room with dark wooden furniture, a velvet armchair, patterned wallpaper and a warm table lamp",
+    "warm tungsten light mixed with window light, rich film colours with fine grain (Kodak Portra 400)", "mermaid", "black-tux", "waves", "short-veil", "retro"],
+  ["beach-sunset", "海边日落", "outdoor", "金色夕阳、海浪与沙滩，最经典的外景",
+    "a quiet sandy beach with gentle waves and the sun low over the sea",
+    "golden-hour backlight with warm rim light on the hair and dress, a soft natural lens flare, warm cinematic colours", "light", "linen", "waves", "flowers", "natural"],
+  ["forest-meadow", "森林草地", "outdoor", "林间草地与斑驳光影，清新的森系",
+    "a sunlit forest meadow with tall trees, wildflowers and soft grass",
+    "dappled sunlight through the leaves, soft green tones, gentle haze", "light", "white-suit", "braid", "flowers", "natural"],
+  ["castle", "欧式城堡", "outdoor", "石砌城堡庭院与拱门，庄重又浪漫",
+    "the stone courtyard of a European castle with arches, towers and climbing roses",
+    "late-afternoon sunlight, warm stone colours, soft shadows", "cathedral", "tailcoat", "low-bun", "veil", "natural"],
+  ["city-dusk", "城市夜景", "outdoor", "黄昏的街道和城市灯光，时尚街拍感",
+    "a city street at dusk with warm shop lights and the evening skyline",
+    "blue-hour ambient light with warm practical lights and creamy bokeh, cinematic contrast", "mermaid", "black-tux", "high-bun", "none", "retro"],
+  ["flower-field", "花海", "outdoor", "大片盛开的花田，柔和梦幻",
+    "a wide field of blooming flowers stretching to the horizon",
+    "soft afternoon backlight, pastel tones, light haze", "ball-gown", "white-suit", "waves", "flowers", "korean"],
+  ["snow", "雪景", "outdoor", "雪后的松林和白色原野，纯净安静",
+    "a snowy pine forest with fresh white snow on the ground",
+    "soft overcast winter light, cool clean tones, gentle falling snow", "a-line", "three-piece", "low-bun", "veil", "natural"],
+  ["chinese-garden", "中式园林", "chinese", "月洞门、回廊与红灯笼，典雅的中式",
+    "a classical Chinese garden with a moon gate, a covered corridor, a lotus pond and red lanterns",
+    "soft daylight, gentle warm tones, refined and calm", "xiuhe", "chinese-groom", "chinese-updo", "phoenix", "chinese"],
+  ["chinese-hall", "中式喜堂", "chinese", "红烛、雕花木门和丝绸灯笼，喜庆传统",
+    "a traditional Chinese wedding hall decorated in red, with carved wooden doors, red candles and silk lanterns",
+    "warm candle-like light, rich reds and golds, slight film grain", "longfeng", "chinese-groom", "chinese-updo", "phoenix", "chinese"],
+  ["palace-wall", "宫墙红瓦", "chinese", "朱红宫墙与金色琉璃瓦，大气的古风",
+    "long vermilion palace walls under golden glazed roof tiles",
+    "clear late-afternoon sunlight, strong warm colours, crisp shadows", "hanfu", "hanfu-groom", "chinese-updo", "phoenix", "chinese"]
+];
+
+export function seedWeddingScenes(db, now = Date.now()) {
+  const insert = db.prepare(`INSERT OR IGNORE INTO wedding_scenes (key, name, category, description, prompt, light,
+    bride_outfit, groom_outfit, hair, headpiece, makeup, enabled, sort, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`);
+  WEDDING_SCENES.forEach((row, i) => insert.run(...row, (i + 1) * 10, now, now));
+}
+
 // Professions added under 职业服装 by migration 4.
 export const MORE_PROFESSIONS = [
   ["security", "保安", "Security guard", "security guard uniform: dark shirt and trousers, plain shoulder patches, duty belt, cap; no real company logos or badge text"],

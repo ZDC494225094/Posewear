@@ -10,6 +10,7 @@ export const LEDGER_KINDS = {
   generation: "生成消耗",
   asset_generation: "素材生成",
   asset_income: "素材收益",
+  wedding: "婚纱照",
   refund: "失败退回",
   admin: "后台调整"
 };

@@ -6,6 +6,7 @@ import * as library from "../services/library.js";
 import * as settings from "../services/settings.js";
 import { uploadFile } from "../services/uploads.js";
 import { imageFile } from "../services/generations.js";
+import * as wedding from "../services/wedding.js";
 import { notFound, unauthorized, forbidden } from "../lib/errors.js";
 
 export const router = express.Router();
@@ -57,6 +58,12 @@ router.get("/uploads/:id/thumb", async (req, res) => {
   const buffer = await sharp(file).resize({ width: 360, height: 480, fit: "inside", withoutEnlargement: true })
     .webp({ quality: 80 }).toBuffer();
   res.set("Cache-Control", "private, max-age=3600").type("image/webp").send(buffer);
+});
+
+// Sample photos of the wedding scenes: public while the scene is online.
+router.get("/wedding/sample/:imageId/:variant", (req, res) => {
+  if (!["full", "thumb"].includes(req.params.variant)) throw notFound();
+  send(res, wedding.sampleFile(req.params.imageId, req.params.variant), { cacheControl: "public, max-age=86400" });
 });
 
 // Generated images: owner and admins always; others only for public works.

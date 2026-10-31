@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import { config } from "./config.js";
-import { seedCategories, addMinors, OUTFIT_TREE, UPSTREAM_OUTFIT_SERIES, MORE_PROFESSIONS } from "./services/taxonomy-seed.js";
+import { seedCategories, addMinors, addMajor, seedWeddingScenes, OUTFIT_TREE, UPSTREAM_OUTFIT_SERIES, MORE_PROFESSIONS,
+  WEDDING_OUTFIT_TREES, WEDDING_PLATE_TREE } from "./services/taxonomy-seed.js";
 
 export const db = new Database(config.dbFile);
 db.pragma("journal_mode = WAL");
@@ -497,6 +498,81 @@ const migrations = [
     ALTER TABLE generations ADD COLUMN realism INTEGER NOT NULL DEFAULT 0;
     `);
     addMinors(conn, "outfit", "professional", MORE_PROFESSIONS);
+  },
+
+  // 5: 婚纱影楼. Scenes users pick from; a shoot (one couple's album) with its
+  // photo slots; works made for a shoot carry its id. Bridal and groom's wear
+  // categories, and a scene category for the empty location plates.
+  (conn) => {
+    conn.exec(`
+    CREATE TABLE wedding_scenes (
+      id INTEGER PRIMARY KEY,
+      key TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL CHECK (category IN ('studio', 'outdoor', 'chinese')),
+      description TEXT NOT NULL DEFAULT '',
+      prompt TEXT NOT NULL DEFAULT '',
+      light TEXT NOT NULL DEFAULT '',
+      plate_asset_id TEXT,
+      plate_job_id TEXT,
+      bride_outfit TEXT NOT NULL DEFAULT '',
+      groom_outfit TEXT NOT NULL DEFAULT '',
+      hair TEXT NOT NULL DEFAULT '',
+      headpiece TEXT NOT NULL DEFAULT '',
+      makeup TEXT NOT NULL DEFAULT '',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      sort INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    -- package: the package as bought (JSON); looks: per look the scene, both
+    -- outfits and the bride's styling (JSON); uploads: the couple's photos.
+    CREATE TABLE wedding_shoots (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT NOT NULL DEFAULT '',
+      package TEXT NOT NULL,
+      extra_per_look INTEGER NOT NULL DEFAULT 0,
+      photos INTEGER NOT NULL,
+      cost_credits INTEGER NOT NULL,
+      refunded_credits INTEGER NOT NULL DEFAULT 0,
+      retakes_left INTEGER NOT NULL DEFAULT 0,
+      bride_uploads TEXT NOT NULL,
+      groom_uploads TEXT NOT NULL,
+      looks TEXT NOT NULL,
+      consent_at INTEGER NOT NULL,
+      deleted_at INTEGER,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX idx_shoots_user ON wedding_shoots(user_id, created_at DESC);
+
+    -- One slot per photo in the album. generation_id is its latest job,
+    -- history the earlier ones; image_id the version the couple chose.
+    CREATE TABLE wedding_photos (
+      id TEXT PRIMARY KEY,
+      shoot_id TEXT NOT NULL REFERENCES wedding_shoots(id) ON DELETE CASCADE,
+      idx INTEGER NOT NULL,
+      look INTEGER NOT NULL,
+      shot TEXT NOT NULL,
+      generation_id TEXT,
+      history TEXT NOT NULL DEFAULT '[]',
+      image_id TEXT,
+      favorite INTEGER NOT NULL DEFAULT 0,
+      failures INTEGER NOT NULL DEFAULT 0,
+      cancelled INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX idx_wphotos_shoot ON wedding_photos(shoot_id, idx);
+
+    ALTER TABLE generations ADD COLUMN shoot_id TEXT;
+    CREATE INDEX idx_gen_shoot ON generations(shoot_id);
+    `);
+    for (const tree of WEDDING_OUTFIT_TREES) addMajor(conn, "outfit", tree);
+    addMajor(conn, "scene", WEDDING_PLATE_TREE);
+    seedWeddingScenes(conn);
   }
 ];
 

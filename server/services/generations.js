@@ -248,7 +248,7 @@ export function create(user, input, { ip }) {
     throw new HttpError(429, "TOO_MANY_ACTIVE", `最多同时进行 ${r.gen.maxActivePerUser} 个任务，请等当前任务完成`);
   }
   if (r.gen.dailyLimitPerUser > 0) {
-    const today = db.prepare("SELECT COUNT(*) AS n FROM generations WHERE user_id = ? AND kind = 'work' AND created_at >= ?")
+    const today = db.prepare("SELECT COUNT(*) AS n FROM generations WHERE user_id = ? AND kind = 'work' AND shoot_id IS NULL AND created_at >= ?")
       .get(user.id, startOfLocalDay()).n;
     if (today >= r.gen.dailyLimitPerUser) {
       throw new HttpError(429, "DAILY_LIMIT", `今日生成次数已达上限（${r.gen.dailyLimitPerUser} 次），明天再来吧`);
@@ -290,7 +290,8 @@ export function create(user, input, { ip }) {
 // ---------- read
 
 function ownedRow(user, id) {
-  const row = db.prepare("SELECT * FROM generations WHERE id = ? AND user_id = ? AND kind = 'work' AND deleted_at IS NULL").get(String(id), user.id);
+  const row = db.prepare(`SELECT * FROM generations WHERE id = ? AND user_id = ? AND kind = 'work' AND shoot_id IS NULL
+    AND deleted_at IS NULL`).get(String(id), user.id);
   if (!row) throw notFound("作品不存在或已删除");
   return row;
 }
@@ -302,7 +303,7 @@ export function getOwned(user, id) {
 // status: "" (all), active, succeeded, failed, public, favorite, or hidden.
 // Works the user hid show up only under "hidden".
 export function listOwned(user, { status, offset, size }) {
-  const where = ["user_id = ?", "kind = 'work'", "deleted_at IS NULL", status === "hidden" ? "user_hidden = 1" : "user_hidden = 0"];
+  const where = ["user_id = ?", "kind = 'work'", "shoot_id IS NULL", "deleted_at IS NULL", status === "hidden" ? "user_hidden = 1" : "user_hidden = 0"];
   const params = [user.id];
   if (status === "active") where.push("status IN ('queued','running')");
   else if (["succeeded", "failed"].includes(status)) { where.push("status = ?"); params.push(status); }
@@ -433,7 +434,8 @@ export function adminList({ status, kind, userId, q, isPublic, offset, size }) {
       usage: r.usage ? JSON.parse(r.usage) : null, promptFinal: r.prompt_final,
       deleted: !!r.deleted_at, clientIp: r.client_ip, hasPerson: r.person_kind !== "none",
       personUploadId: r.person_upload_id, outfitUploadId: r.outfit_upload_id,
-      kind: r.kind, refUploadId: r.ref_upload_id, sourceAssetId: r.source_asset_id, assetJob: r.kind === "asset" ? JSON.parse(r.params || "{}") : null
+      kind: r.kind, refUploadId: r.ref_upload_id, sourceAssetId: r.source_asset_id, assetJob: r.kind === "asset" ? JSON.parse(r.params || "{}") : null,
+      shootId: r.shoot_id
     }))
   };
 }

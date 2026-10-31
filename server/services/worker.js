@@ -8,6 +8,7 @@ import * as library from "./library.js";
 import * as uploads from "./uploads.js";
 import * as channels from "./channels.js";
 import * as assetJobs from "./asset-jobs.js";
+import * as wedding from "./wedding.js";
 import * as fees from "./asset-fees.js";
 import { InputError } from "./asset-jobs.js";
 import { providerFor, ProviderError, PUBLIC_MESSAGES } from "./providers/index.js";
@@ -82,9 +83,10 @@ async function prepare(file, { lineArt, maxEdge }) {
 async function loadInputs(job) {
   const maxEdge = settings.get("generation").inputMaxEdge;
   const images = [];
-  if (job.kind === "asset") {
-    for (const input of assetJobs.inputFiles(job)) {
-      images.push({ ...(await prepare(input.file, { lineArt: input.lineArt, maxEdge })), name: input.name });
+  if (job.kind === "asset" || job.shoot_id) {
+    const inputs = job.kind === "asset" ? assetJobs.inputFiles(job) : wedding.inputFiles(job);
+    for (const input of inputs) {
+      images.push({ ...(await prepare(input.file, { lineArt: !!input.lineArt, maxEdge })), name: input.name });
     }
     return images.map((img) => ({ ...img, name: `${img.name}.${img.ext}` }));
   }

@@ -21,6 +21,7 @@ import { router as assetsRouter } from "./routes/assets.js";
 import { router as billingRouter, notifyRouter } from "./routes/billing.js";
 import { router as mediaRouter } from "./routes/media.js";
 import { router as adminRouter } from "./routes/admin.js";
+import { router as weddingRouter } from "./routes/wedding.js";
 import { log } from "./lib/logger.js";
 
 migrate();
@@ -60,7 +61,7 @@ app.use("/api", notifyRouter);
 app.use(express.json({ limit: "1mb" }));
 app.use(session);
 app.use("/api", csrf);
-app.use("/api", publicRouter, authRouter, meRouter, libraryRouter, studioRouter, assetsRouter, billingRouter, adminRouter);
+app.use("/api", publicRouter, authRouter, meRouter, libraryRouter, studioRouter, assetsRouter, weddingRouter, billingRouter, adminRouter);
 app.use("/api", notFoundApi);
 app.use("/media", mediaRouter);
 
