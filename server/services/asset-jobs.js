@@ -237,7 +237,8 @@ export function assetInfo(assetId, { admin = false, userId = null } = {}) {
     job: {
       id: row.id, category: p.categoryLabel, description: p.description,
       angle: p.type === "pose" ? angleOf(p.angle) : null,
-      reference: row.ref_upload_id ? { thumb: refAlive ? `/media/uploads/${row.ref_upload_id}/thumb` : null } : null,
+      reference: row.ref_upload_id ? { thumb: refAlive ? `/media/uploads/${row.ref_upload_id}/thumb` : null,
+        url: refAlive ? `/media/uploads/${row.ref_upload_id}` : null } : null,
       source: source ? toDto(source) : row.source_asset_id ? { id: row.source_asset_id } : null,
       createdAt: row.created_at, finishedAt: row.finished_at,
       ...(admin ? { userEmail: row.user_email, platform: !!p.platform, promptFinal: row.prompt_final, apiCostUsd: row.api_cost_usd } : {})

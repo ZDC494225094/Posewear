@@ -10,7 +10,7 @@ import { reportDialog, refBlock } from "../components/gen-card.js";
 export function sameRefsLink(g) {
   const params = new URLSearchParams();
   if (g.refs?.pose?.id) params.set("pose", g.refs.pose.id);
-  if (g.refs?.outfit?.id) params.set("outfit", g.refs.outfit.id);
+  if (g.refs?.outfit?.id && !g.refs.outfit.upload) params.set("outfit", g.refs.outfit.id);
   if (g.refs?.scene?.id) params.set("sceneId", g.refs.scene.id);
   if (g.refs?.items?.length) params.set("items", g.refs.items.map((i) => i.id).join(","));
   if (g.style) params.set("style", g.style);
@@ -35,13 +35,13 @@ export async function render() {
     const flat = items.flatMap((g) => g.images.map((img) => ({ src: img.url, alt: "用户作品", g, img })));
     const start = flat.findIndex((x) => x.g === items[index]);
     lightbox(flat, Math.max(0, start), {
-      renderAside: (item) => h("div.viewer-aside",
+      renderAside: (item, { close }) => h("div.viewer-aside",
         h("p.viewer-title", item.g.author || "匿名创作者"),
         h("p.small.muted", [styles[item.g.style], relative(item.g.publishedAt)].filter(Boolean).join(" · ")),
         h("div.viewer-sec", h("p.viewer-sec-title", "所用参考"), refBlock(item.g.refs)),
         h("div.viewer-actions",
           hasLibraryRefs(item.g)
-            ? h("a.btn.btn-primary.btn-block", { href: sameRefsLink(item.g) }, cicon("sparkle", "yellow"), "用同款参考创作") : null,
+            ? h("a.btn.btn-primary.btn-block", { href: sameRefsLink(item.g), onclick: close }, cicon("sparkle", "yellow"), "用同款参考创作") : null,
           item.g.refs?.person ? h("p.small.muted", "人物参考不会公开，同款创作时可以换成自己的人物。") : null,
           h("button.btn.btn-ghost.btn-block", { type: "button", onclick: () => reportDialog(item.g.id) }, cicon("flag", "red", 15), "举报")))
     });

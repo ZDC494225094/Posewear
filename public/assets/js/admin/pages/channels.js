@@ -28,6 +28,8 @@ function channelFields(kind, models) {
     { key: "priority", label: "优先级", type: "number", help: "数字越大越先使用。失败时自动切到下一个渠道。" },
     { key: "options.maxConcurrency", label: "最大并发", type: "number", min: 0, max: 100, help: "0 表示不限制。用来避开账号的速率限制（每分钟图片数）。" },
     { key: "options.timeoutSec", label: "超时（秒）", type: "number", min: 0, max: 900, help: "0 表示使用「生成与计费」里的全局设置。" },
+    { key: "options.connectTimeoutSec", label: "连接超时（秒）", type: "number", min: 1, max: 120,
+      help: "等待 TCP/TLS 连接建立的时间，默认 30 秒；与上面的完整请求超时分别设置，且不会超过完整请求时限。" },
     { key: "options.imageField", label: "参考图字段名", type: "select", options: [["image[]", "image[]（官方）"], ["image", "image（部分中转站）"]] },
     { key: "options.omitParams", label: "不发送的参数", type: "tags", rows: 2, placeholder: "moderation, safety_identifier",
       help: "中转站不支持某些参数时填在这里，可选：moderation、safety_identifier、output_format、output_compression、quality、n。" },
@@ -40,7 +42,7 @@ function editChannel(channel, models, onSaved) {
   const kind = channel.kind || "openai";
   const value = isNew ? {
     kind, name: kind === "mock" ? "模拟渠道" : "OpenAI · gpt-image-2", baseUrl: "https://api.openai.com/v1", model: kind === "mock" ? "mock" : "gpt-image-2",
-    priority: 10, enabled: true, apiKey: "", options: { sizeMode: "flexible", inputFidelity: "omit", maxConcurrency: 0, timeoutSec: 0,
+    priority: 10, enabled: true, apiKey: "", options: { sizeMode: "flexible", inputFidelity: "omit", maxConcurrency: 0, timeoutSec: 0, connectTimeoutSec: 30,
       imageField: "image[]", omitParams: [], mockDelayMs: 2000 }
   } : channel;
   const fields = channelFields(kind, models);

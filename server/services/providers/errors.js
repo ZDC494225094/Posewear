@@ -18,9 +18,45 @@ export const PUBLIC_MESSAGES = {
   moderation: "内容未通过模型的安全审核，请调整描述或参考图后重试。本次点数已退回。",
   rejected: "模型无法处理这次请求，请调整描述或参考图后重试。本次点数已退回。",
   busy: "生成服务暂时繁忙，请稍后重试。本次点数已退回。",
+  network: "无法连接生成服务，请稍后重试或联系管理员。本次点数已退回。",
+  connectTimeout: "连接生成服务超时，请稍后重试。本次点数已退回。",
+  timeout: "等待生成服务响应超时，请稍后重试。本次点数已退回。",
   unavailable: "生成服务暂不可用，请稍后重试。本次点数已退回。",
   internal: "生成过程中出现异常，请稍后重试。本次点数已退回。"
 };
+
+export function classifyTransportError(err, timeoutMs) {
+  if (err instanceof ProviderError) return err;
+  const cause = err?.cause || err;
+  const code = cause?.code || cause?.errors?.[0]?.code || "";
+  const detail = JSON.stringify({ name: err?.name, code, message: err?.message,
+    cause: err?.cause?.message, errors: cause?.errors?.map((e) => ({ code: e.code, address: e.address, port: e.port })),
+    timeoutMs });
+  if (code === "UND_ERR_CONNECT_TIMEOUT") {
+    return new ProviderError("transient", `Connection timed out: ${code}`, {
+      code: "CONNECT_TIMEOUT", detail, publicMessage: PUBLIC_MESSAGES.connectTimeout
+    });
+  }
+  if (err?.name === "TimeoutError" || err?.name === "AbortError" || /UND_ERR_(HEADERS|BODY)_TIMEOUT/.test(code)) {
+    return new ProviderError("transient", `Request timed out after ${Math.round(timeoutMs / 1000)}s`, {
+      code: "TIMEOUT", detail, publicMessage: PUBLIC_MESSAGES.timeout
+    });
+  }
+  return new ProviderError("transient", `Network error: ${code || err?.message || err}`, {
+    code: "NETWORK", detail, publicMessage: PUBLIC_MESSAGES.network
+  });
+}
+
+export function summarizeFailures(errors) {
+  const transient = errors.filter((e) => e.kind === "transient");
+  const last = errors.at(-1);
+  const relevant = transient.at(-1) || last;
+  return {
+    code: last?.kind === "channel" ? "CHANNEL_ERROR" : "UPSTREAM_ERROR",
+    publicMessage: relevant?.publicMessage || (transient.length ? PUBLIC_MESSAGES.busy : PUBLIC_MESSAGES.unavailable),
+    detail: JSON.stringify(errors)
+  };
+}
 
 export function classifyHttpError(status, json, raw) {
   const err = (json && typeof json === "object" && json.error) || {};

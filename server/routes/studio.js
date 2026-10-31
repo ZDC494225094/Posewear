@@ -87,13 +87,6 @@ router.post("/generations/:id/flags", requireUser, (req, res) => {
   res.json({ generation: generations.setFlags(req.user, req.params.id, flags) });
 });
 
-// The owner's filing: { hidden } and/or { favorite }.
-router.post("/generations/:id/flags", requireUser, (req, res) => {
-  const flags = {};
-  for (const key of ["hidden", "favorite"]) if (req.body?.[key] !== undefined) flags[key] = v.bool(req.body[key]);
-  res.json({ generation: generations.setFlags(req.user, req.params.id, flags) });
-});
-
 router.post("/generations/:id/publish", requireUser, (req, res) => {
   res.json({ generation: generations.setPublic(req.user, req.params.id, v.bool(req.body?.public)) });
 });

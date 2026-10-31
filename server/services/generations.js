@@ -51,6 +51,15 @@ function assetRef(id) {
   return asset ? { id: asset.id, thumb: library.dto(asset).thumb, name: asset.name_zh || asset.name } : { id };
 }
 
+function outfitUploadRef(id, owner) {
+  const out = { upload: true };
+  if (!owner) return out;
+  const upload = db.prepare("SELECT * FROM uploads WHERE id = ?").get(id);
+  const alive = upload && !upload.deleted_at && (!upload.expires_at || upload.expires_at > Date.now());
+  return { ...out, id, thumb: alive ? `/media/uploads/${id}/thumb` : null,
+    url: alive ? `/media/uploads/${id}` : null };
+}
+
 // The person reference. Others only learn whether there was one and of which
 // kind; the owner (and admins) also get the source and a thumbnail while the
 // image still exists.
@@ -80,7 +89,7 @@ function refSummary(row, { owner = false } = {}) {
   const used = [pose, outfit, scene, ...items].filter(Boolean);
   return {
     pose: assetRef(row.pose_id),
-    outfit: row.outfit_id ? assetRef(row.outfit_id) : row.outfit_upload_id ? { upload: true } : null,
+    outfit: row.outfit_id ? assetRef(row.outfit_id) : row.outfit_upload_id ? outfitUploadRef(row.outfit_upload_id, owner) : null,
     scene: assetRef(row.scene_asset_id),
     items: itemIds.map(assetRef),
     person: personRef(row, owner),

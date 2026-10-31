@@ -19,8 +19,10 @@ const NAV = [
   ]],
   ["内容", [
     ["/admin/assets", "素材库", "hanger", "teal", () => import("./pages/assets.js")],
+    ["/admin/asset-jobs", "素材生成记录", "list", "purple", () => import("./pages/asset-jobs.js")],
     ["/admin/asset-categories", "素材分类", "folder", "blue", () => import("./pages/asset-categories.js")],
     ["/admin/asset-settings", "素材生成与分成", "coins", "yellow", () => import("./pages/asset-settings.js")],
+    ["/admin/virtual-persons", "虚拟人审核", "person", "green", () => import("./pages/virtual-persons.js")],
     ["/admin/safety", "内容安全", "shield", "green", () => import("./pages/safety.js")]
   ]],
   ["配置", [
@@ -80,15 +82,20 @@ async function boot() {
   await router.render();
 
   // Pending moderation work shows as a badge in the nav.
-  try {
-    const o = await api.get("/api/admin/overview", { days: 7 });
-    const show = (href, n) => {
-      const badge = badges.get(href);
-      if (n && badge) { badge.textContent = String(n); badge.hidden = false; }
-    };
-    show("/admin/reports", o.pendingReports + o.pendingReview);
-    show("/admin/assets", o.pendingAssets);
-  } catch { /* badge is optional */ }
+  async function refreshBadges() {
+    try {
+      const o = await api.get("/api/admin/overview", { days: 7 });
+      const show = (href, n) => {
+        const badge = badges.get(href);
+        if (badge) { badge.textContent = String(n || ""); badge.hidden = !n; }
+      };
+      show("/admin/reports", o.pendingReports + o.pendingReview);
+      show("/admin/assets", o.pendingAssets);
+      show("/admin/virtual-persons", o.pendingVirtual);
+    } catch { /* badge is optional */ }
+  }
+  document.addEventListener("pw:moderation-changed", refreshBadges);
+  refreshBadges();
 }
 
 boot();

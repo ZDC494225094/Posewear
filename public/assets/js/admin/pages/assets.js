@@ -5,11 +5,15 @@ import { selectMenu } from "../../core/select.js";
 import { label, number, dateTime } from "../../core/format.js";
 import { pageHead, section, form, drawer, statusPill } from "../kit.js";
 import { openAssetGenerator, taxonomy, categoryOptions } from "../../components/asset-generator.js";
-import { assetJobList } from "../../components/asset-jobs.js";
+import { activeJobsChip } from "../../components/asset-jobs.js";
+import { TYPE_TEXT } from "../../components/library-browser.js";
+import { assetGenerationInfo } from "../../components/asset-generation-info.js";
+
+const TYPES = Object.entries(TYPE_TEXT);
 
 const RATINGS = [["general", "普通"], ["suggestive", "敏感"], ["explicit", "限制"]];
 const RATING_TONE = { general: "mat", suggestive: "tape", explicit: "pin" };
-const RATING_HELP = "普通：可与人物照片同用；敏感：可用于 AI 生成（可在内容安全中关闭），但不能与人物照片同用；限制：只能浏览，永不发给模型。";
+const RATING_HELP = "普通：可与真人照片同用；敏感：可用于 AI 生成（可在内容安全中关闭），但不能与真人照片同用；虚拟人不受此额外限制。限制：只能浏览，永不发给模型。";
 const LICENSES = [["commercial", "可商用"], ["noncommercial", "非商用"]];
 const SOURCE_TEXT = { upstream: "导入", custom: "上传", ai: "AI 生成" };
 const REVIEW_TEXT = { none: "", pending: "待审核", approved: "已通过", rejected: "未通过" };
@@ -27,22 +31,22 @@ function minorOf(tree, asset) {
   return major?.children.find((c) => c.key === asset.category?.key) || null;
 }
 
-async function uploadDialog(onDone) {
+async function uploadDialog(onDone, initialType = "outfit") {
   let tree;
   try { tree = await taxonomy({ fresh: true }); } catch (err) { toastError(err); return; }
-  let type = "outfit";
+  let type = initialType;
   let f;
   const formBox = h("div");
   const typeSeg = h("div.seg", { role: "radiogroup", "aria-label": "素材类型" });
   function build() {
-    replace(typeSeg, [["pose", "姿势"], ["outfit", "服装"]].map(([value, text]) => h("button", { type: "button", role: "radio",
+    replace(typeSeg, TYPES.map(([value, text]) => h("button", { type: "button", role: "radio",
       "aria-checked": String(value === type), "aria-pressed": String(value === type), onclick: () => { type = value; build(); } }, text)));
     f = form([
       { key: "categoryId", label: "分类", type: "select", options: categoryOptions(tree[type]) },
       { key: "rating", label: "分级", type: "select", options: RATINGS, help: RATING_HELP },
       { key: "license", label: "授权", type: "select", options: LICENSES, help: "只有你拥有版权或已获商用授权的图片才选“可商用”。" },
-      { key: "nameZh", label: "名称", placeholder: type === "pose" ? "如 双手叉腰站姿" : "如 红色齐胸襦裙" },
-      type === "outfit" ? { key: "keywords", label: "英文关键词（选填）", placeholder: "white blouse, pleated skirt", help: "会附在提示词里帮助模型还原服装。" } : null,
+      { key: "nameZh", label: "名称", placeholder: { pose: "如 双手叉腰站姿", outfit: "如 红色齐胸襦裙", scene: "如 黄昏江边步道", item: "如 珍珠吊坠项链" }[type] },
+      type !== "pose" ? { key: "keywords", label: "英文关键词（选填）", placeholder: { outfit: "white blouse, pleated skirt", scene: "riverside at sunset, arch bridge", item: "pearl pendant, gold chain" }[type], help: "会附在提示词里帮助模型还原素材。" } : null,
       type === "pose" ? { key: "people", label: "人数", type: "select", number: true, options: [[1, "单人"], [2, "双人"]] } : null
     ].filter(Boolean), { categoryId: tree[type][0]?.children[0]?.id, rating: "general", license: "commercial", nameZh: "", keywords: "", people: 1 });
     replace(formBox, f.node);
@@ -53,7 +57,7 @@ async function uploadDialog(onDone) {
     onchange: () => { fileNote.textContent = file.files.length ? `已选 ${file.files.length} 张` : "未选择图片"; } });
   const progress = h("p.small.muted");
   const m = drawer("上传素材", h("div.stack",
-    h("p.a-callout.small", "只上传你拥有版权或已获授权的图片。姿势建议使用白底线稿，服装建议使用纯色背景的平铺或模特图。"),
+    h("p.a-callout.small", "只上传你拥有版权或已获授权的图片。姿势建议使用白底线稿，服装使用纯色背景，场景使用无人环境图，物品使用清晰的单件产品图。"),
     typeSeg, formBox,
     h("div.a-field.is-wide", h("label", "图片（可多选，每张生成一个素材）"),
       h("div.a-file", h("button.btn.btn-sm", { type: "button", onclick: () => file.click() }, cicon("upload", "blue", 15), "选择图片"), fileNote, file)),
@@ -80,7 +84,7 @@ async function uploadDialog(onDone) {
       }) }, "上传"))), { width: 600 });
 }
 
-async function editAsset(a, onDone, { onGenerated } = {}) {
+export async function editAsset(a, onDone, { onGenerated } = {}) {
   let tree;
   try { tree = await taxonomy(); } catch (err) { toastError(err); return; }
   const current = minorOf(tree, a);
@@ -103,6 +107,7 @@ async function editAsset(a, onDone, { onGenerated } = {}) {
       toast(message, { type: "success" });
       m.close();
       onDone();
+      document.dispatchEvent(new Event("pw:moderation-changed"));
     } catch (err) { toastError(err); }
   }
 
@@ -122,6 +127,7 @@ async function editAsset(a, onDone, { onGenerated } = {}) {
       `来源：${isUser ? `用户 ${a.ownerEmail || a.owner.name}` : SOURCE_TEXT[a.source] || a.source}`, dateTime(a.createdAt)].filter(Boolean).join(" · ")),
     isUser ? h("p.small.muted", `作者设置：${a.visibility === "public" ? "公开" : "私有"} · 使用费 ${a.price} 点 · 作者累计收益 ${a.earned} 点`) : null,
     reviewBox,
+    a.generated ? assetGenerationInfo(a, { admin: true }) : null,
     f.node,
     h("div.a-form-actions",
       a.source !== "upstream" ? h("button.btn.btn-danger", { type: "button", onclick: async () => {
@@ -137,10 +143,10 @@ async function editAsset(a, onDone, { onGenerated } = {}) {
       }) }, "保存"))), { width: 580 });
 }
 
-export async function render() {
+export async function render(ctx) {
   let facets;
   try { facets = await api.get("/api/admin/assets/facets"); } catch (err) { toastError(err); return h("div"); }
-  const state = { type: "pose", rating: "", enabled: "", series: "", category: "", origin: "", license: "", review: "", q: "", page: 1 };
+  const state = { type: Object.hasOwn(TYPE_TEXT, ctx.query.type) ? ctx.query.type : "pose", rating: "", enabled: "", series: "", category: "", origin: "", license: "", review: "", q: "", page: 1 };
   const selected = new Set();
   const size = 60;
   const grid = h("div.a-asset-grid");
@@ -149,9 +155,8 @@ export async function render() {
   const bulkBar = h("div.a-bulk", { hidden: true });
   const tabs = h("div.seg.a-type-tabs", { role: "tablist", "aria-label": "素材类型" });
   const summaryBox = h("div.a-tabs-note");
-  const jobs = assetJobList({ endpoint: "/api/admin/asset-jobs", admin: true, limit: 6,
-    onFinished: () => refresh(), onOpenAsset: (a) => editAsset(a, refresh, { onGenerated }) });
-  const onGenerated = (items) => jobs.add(items);
+  const jobs = activeJobsChip({ endpoint: "/api/admin/asset-jobs", href: "/admin/asset-jobs", onSettled: () => refresh() });
+  const onGenerated = () => jobs.refresh();
 
   const typeCount = (type, rating) => facets.ratingCounts
     .filter((r) => r.type === type && (!rating || r.rating === rating)).reduce((n, r) => n + r.n, 0);
@@ -165,11 +170,12 @@ export async function render() {
   }
 
   function renderTabs() {
-    replace(tabs, [["pose", "姿势"], ["outfit", "服装"]].map(([value, text]) =>
+    replace(tabs, TYPES.map(([value, text]) =>
       h("button", { type: "button", role: "tab", "aria-selected": String(state.type === value), "aria-pressed": String(state.type === value),
         onclick: () => {
           if (state.type === value) return;
           Object.assign(state, { type: value, series: "", category: "", page: 1 });
+          history.replaceState({}, "", value === "pose" ? "/admin/assets" : `/admin/assets?type=${value}`);
           selected.clear();
           renderTabs();
           renderBar();
@@ -184,6 +190,7 @@ export async function render() {
       state.review = state.review === "pending" ? "" : "pending";
       state.page = 1;
       renderTabs();
+      renderBar();
       load();
     } }, "待审核", h("span.chip-note.num", number(f.pending))) : null);
   }
@@ -200,6 +207,7 @@ export async function render() {
       sel("origin", ORIGINS.map(([v, t]) => [v, t]), "来源"),
       sel("license", [["", "全部授权"], ...LICENSES], "授权"),
       sel("rating", [["", "全部分级"], ...RATINGS], "分级"),
+      sel("review", [["", "全部审核状态"], ["pending", "待审核"], ["approved", "已通过"], ["rejected", "未通过"]], "审核状态", renderTabs),
       sel("enabled", [["", "上架和下架"], ["1", "仅上架"], ["0", "仅下架"]], "上架状态"),
       h("input.input", { type: "search", placeholder: "搜索 ID / 名称 / 关键词 / 作者", "aria-label": "搜索", value: state.q,
         oninput: (e) => { clearTimeout(bar._t); bar._t = setTimeout(() => { state.q = e.target.value.trim(); state.page = 1; load(); }, 300); } }));
@@ -208,7 +216,7 @@ export async function render() {
   function renderBulk() {
     bulkBar.hidden = false;
     const f = facets[state.type];
-    const scopeParts = [state.type === "pose" ? "姿势" : "服装",
+    const scopeParts = [TYPE_TEXT[state.type],
       state.series ? f.series.find((s) => s.key === state.series)?.zh : null,
       state.category ? f.categories.find((c) => c.key === state.category && (!state.series || c.series === state.series))?.zh : null,
       state.origin ? ORIGINS.find(([v]) => v === state.origin)?.[1] : null].filter(Boolean);
@@ -273,17 +281,17 @@ export async function render() {
   renderTabs();
   renderBar();
   load();
-  jobs.load();
   const node = h("div",
-    pageHead("素材库", "姿势和服装的分类、授权、分级与上架。AI 生成和后台上传的素材可以删除，导入的原项目素材只能停用。", [
+    pageHead("素材库", "姿势、服装、场景和物品的分类、授权、审核与上架。生成任务集中在独立的「素材生成记录」页面。", [
+      jobs.node,
+      h("a.btn", { href: "/admin/asset-jobs" }, cicon("list", "gray"), "生成记录"),
       h("a.btn", { href: "/admin/asset-categories" }, cicon("folder", "blue"), "分类管理"),
-      h("button.btn", { type: "button", onclick: () => uploadDialog(refresh) }, cicon("upload", "blue"), "上传素材"),
+      h("button.btn", { type: "button", onclick: () => uploadDialog(refresh, state.type) }, cicon("upload", "blue"), "上传素材"),
       h("button.btn.btn-primary", { type: "button", onclick: () => openAssetGenerator({ admin: true, type: state.type, onCreated: onGenerated }) },
         cicon("wand", "purple"), "AI 生成素材")
     ]),
     h("p.a-callout.small", "版权提醒：导入的原项目图片不在 MIT 许可范围内，已标记为“非商用”。取得权利人书面授权后，可批量改为“可商用”；也可以用 AI 生成可商用的平台素材替换。"),
-    jobs.node,
     h("div.a-tabs-row", tabs, summaryBox),
     section(null, null, bar, bulkBar, grid, foot));
-  return { node, cleanup: () => jobs.stop() };
+  return { node, cleanup: () => { jobs.stop(); clearTimeout(bar._t); } };
 }

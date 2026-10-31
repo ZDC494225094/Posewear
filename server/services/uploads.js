@@ -162,7 +162,7 @@ export function listVirtual({ status, offset, size }) {
 
 export function reviewVirtual(id, { approve, note }) {
   const row = db.prepare("SELECT * FROM uploads WHERE id = ? AND kind = 'person' AND deleted_at IS NULL").get(String(id));
-  if (!row || row.virtual === "none") throw notFound("没有这条虚拟人申请");
+  if (!row || row.virtual === "none" || (row.expires_at && row.expires_at <= Date.now())) throw notFound("没有这条虚拟人申请，或图片已过期");
   if (approve) {
     db.prepare("UPDATE uploads SET virtual = 'approved', virtual_note = '', expires_at = NULL WHERE id = ?").run(row.id);
   } else {

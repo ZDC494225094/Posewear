@@ -104,9 +104,14 @@ app.use(errorHandler);
 if (config.workerEnabled) worker.start();
 startMaintenance();
 
-const server = app.listen(config.port, config.host, () => {
+const server = app.listen(config.port, config.host);
+server.once("listening", () => {
   log.info(`${settings.get("site").name} listening on http://${config.host === "0.0.0.0" ? "localhost" : config.host}:${config.port}`);
   log.info(`Data: ${config.dataDir} · Library: ${config.libraryDir}`);
+});
+server.once("error", (err) => {
+  log.error(`Failed to listen on ${config.host}:${config.port} (${err.code || "LISTEN_ERROR"})`, err);
+  process.exitCode = 1;
 });
 server.requestTimeout = 120_000;
 

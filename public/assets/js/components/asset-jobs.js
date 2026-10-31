@@ -1,6 +1,7 @@
 import { h, tile, replace } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { relative, number, STATUS_TEXT } from "../core/format.js";
+import { toastError } from "../core/ui.js";
 
 // Asset-generation jobs: the records list on the 素材生成 pages, and a small
 // indicator of running jobs for the pages that start them.
@@ -44,6 +45,9 @@ export function assetJobList({ endpoint, admin = false, size = 20, onFinished, o
   const more = h("button.btn", { type: "button", hidden: true, onclick: () => fetchPage(false) }, "加载更多");
   const summary = h("p.small.muted.ajobs-summary");
   let page = 1, total = 0, query = {}, timer = null, stopped = false, token = 0;
+  const matches = (job) => (!query.type || job.type === query.type)
+    && (!query.status || (query.status === "active" ? active(job) : job.status === query.status))
+    && (!query.scope || (query.scope === "platform" ? job.platform : !job.platform));
 
   function render() {
     const rows = [...jobs.values()].sort((a, b) => b.createdAt - a.createdAt);
@@ -54,29 +58,35 @@ export function assetJobList({ endpoint, admin = false, size = 20, onFinished, o
 
   async function fetchPage(reset) {
     const mine = ++token;
-    if (reset) page = 1; else page += 1;
+    const nextPage = reset ? 1 : page + 1;
     more.disabled = true;
     try {
-      const data = await api.get(endpoint, { ...query, page, size });
-      if (mine !== token) return;
+      const data = await api.get(endpoint, { ...query, page: nextPage, size });
+      if (stopped || mine !== token) return;
+      page = nextPage;
       if (reset) jobs.clear();
       total = data.total;
       for (const job of data.items) jobs.set(job.id, job);
       render();
       schedule();
-    } catch { /* keep what is shown */ }
-    more.disabled = false;
+    } catch (err) { if (!stopped && mine === token) toastError(err); }
+    finally { if (mine === token) more.disabled = false; }
   }
 
   async function poll() {
     timer = null;
     const ids = [...jobs.values()].filter(active).map((j) => j.id);
     if (stopped || !ids.length) return;
+    const mine = token;
     try {
-      const { items } = await api.get(endpoint, { ids: ids.join(",") });
+      const pages = [];
+      for (let i = 0; i < ids.length; i += 50) pages.push(api.get(endpoint, { ids: ids.slice(i, i + 50).join(",") }));
+      const items = (await Promise.all(pages)).flatMap((p) => p.items);
+      if (stopped || mine !== token) return;
       for (const job of items) {
         const before = jobs.get(job.id);
-        jobs.set(job.id, job);
+        if (matches(job)) jobs.set(job.id, job);
+        else { jobs.delete(job.id); total = Math.max(0, total - 1); }
         if (before && active(before) && !active(job)) onFinished?.(job);
       }
       render();
@@ -89,9 +99,9 @@ export function assetJobList({ endpoint, admin = false, size = 20, onFinished, o
 
   return {
     node: h("div.ajobs", summary, list, h("div.lib-more-wrap", more)),
-    load(filters = {}) { query = filters; fetchPage(true); },
+    load(filters = {}) { query = { ...filters }; clearTimeout(timer); timer = null; return fetchPage(true); },
     add(items) {
-      for (const job of items) { if (!jobs.has(job.id)) total += 1; jobs.set(job.id, job); }
+      for (const job of items) { if (!matches(job)) continue; if (!jobs.has(job.id)) total += 1; jobs.set(job.id, job); }
       render();
       schedule();
     },

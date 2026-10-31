@@ -18,6 +18,7 @@ const DEFAULT_OPTIONS = {
   sizeMode: "flexible",      // flexible | fixed | auto
   inputFidelity: "omit",     // omit | high | low  (gpt-image-2 requires omit)
   timeoutSec: 0,             // 0 = use the global setting
+  connectTimeoutSec: 30,     // TCP/TLS deadline, separate from the full request
   maxConcurrency: 0,         // 0 = unlimited
   omitParams: [],            // e.g. ["moderation", "safety_identifier"] for strict relays
   imageField: "image[]",     // multipart field name for input images; some relays expect "image"
@@ -42,6 +43,7 @@ function cleanOptions(input = {}, base = DEFAULT_OPTIONS) {
     sizeMode: ["flexible", "fixed", "auto"].includes(o.sizeMode) ? o.sizeMode : "flexible",
     inputFidelity: ["omit", "high", "low"].includes(o.inputFidelity) ? o.inputFidelity : "omit",
     timeoutSec: Math.max(0, Math.min(900, Math.round(Number(o.timeoutSec) || 0))),
+    connectTimeoutSec: Math.max(1, Math.min(120, Math.round(Number(o.connectTimeoutSec) || 30))),
     maxConcurrency: Math.max(0, Math.min(100, Math.round(Number(o.maxConcurrency) || 0))),
     omitParams: (Array.isArray(o.omitParams) ? o.omitParams : String(o.omitParams || "").split(/[,\s]+/))
       .map((p) => String(p).trim()).filter((p) => OMITTABLE.includes(p)),

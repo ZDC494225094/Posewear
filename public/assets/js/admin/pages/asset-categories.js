@@ -4,6 +4,7 @@ import { toast, toastError, busy, confirmDialog } from "../../core/ui.js";
 import { number } from "../../core/format.js";
 import { pageHead, form, drawer, statusPill, table } from "../kit.js";
 import { taxonomy } from "../../components/asset-generator.js";
+import { TYPE_TEXT } from "../../components/library-browser.js";
 
 // The two-level category tree. Minor categories carry the hint that AI asset
 // generation adds to its prompt, and decide whether generation is open.
@@ -54,7 +55,7 @@ function editCategory({ type, parent = null, category = null, onDone }) {
 }
 
 export async function render(ctx) {
-  let type = ctx.query.type === "outfit" ? "outfit" : "pose";
+  let type = Object.hasOwn(TYPE_TEXT, ctx.query.type) ? ctx.query.type : "pose";
   let data;
   const body = h("div.a-cats");
   const tabs = h("div.seg.a-type-tabs", { role: "tablist", "aria-label": "素材类型" });
@@ -67,9 +68,9 @@ export async function render(ctx) {
 
   function renderAll() {
     const total = (t) => data[t].reduce((n, m) => n + m.children.length, 0);
-    replace(tabs, [["pose", "姿势"], ["outfit", "服装"]].map(([value, text]) =>
+    replace(tabs, Object.entries(TYPE_TEXT).map(([value, text]) =>
       h("button", { type: "button", role: "tab", "aria-selected": String(type === value), "aria-pressed": String(type === value),
-        onclick: () => { type = value; history.replaceState({}, "", value === "outfit" ? "/admin/asset-categories?type=outfit" : "/admin/asset-categories"); renderAll(); } },
+        onclick: () => { type = value; history.replaceState({}, "", value === "pose" ? "/admin/asset-categories" : `/admin/asset-categories?type=${value}`); renderAll(); } },
         text, h("span.chip-note.num", `${data[value].length} 大类 · ${total(value)} 小类`))));
     const majors = data[type];
     replace(body, majors.length ? majors.map((major) => h("section.a-section.a-cat",
@@ -92,7 +93,7 @@ export async function render(ctx) {
 
   await reload();
   return h("div",
-    pageHead("素材分类", "姿势和服装按大类、小类整理。素材库筛选、上传和 AI 生成都用这棵分类树。", [
+    pageHead("素材分类", "姿势、服装、场景和物品按大类、小类整理。素材库筛选、上传和 AI 生成都用这棵分类树。", [
       h("a.btn", { href: "/admin/asset-settings" }, cicon("sliders", "gray"), "生成与分成设置"),
       h("button.btn.btn-primary", { type: "button", onclick: () => editCategory({ type, onDone: reload }) }, cicon("plus", "blue"), "添加大类")
     ]),

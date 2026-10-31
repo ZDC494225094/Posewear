@@ -306,7 +306,10 @@ export async function render(ctx) {
       let list = [];
       try { list = (await api.get("/api/uploads", { kind: "person" })).items; } catch (err) { toastError(err); }
       const usable = (u) => u.virtual === "approved" || u.consent;
-      replace(box, list.length ? h("div.person-grid", list.map((u) => {
+      replace(box,
+        h("div.person-list-head", h("p.small.muted", "审核通过的虚拟人可直接使用。"),
+          h("button.btn.btn-sm", { type: "button", onclick: show }, "刷新审核状态")),
+        list.length ? h("div.person-grid", list.map((u) => {
         const [pillText, tone] = VIRTUAL_PILL[u.virtual] || ["真人", ""];
         return h("figure.person-card", { class: usable(u) ? "" : "is-off" },
           h("button.person-pick", { type: "button", disabled: !usable(u), "aria-label": usable(u) ? "使用这张照片" : "这张照片暂不能使用",
@@ -315,8 +318,8 @@ export async function render(ctx) {
             h("span.pill", { class: tone ? `pill-${tone}` : "" }, pillText),
             u.virtual === "rejected" && u.virtualNote ? h("span.small.text-error", u.virtualNote) : null,
             h("span.person-card-actions",
-              u.consent && u.virtual !== "approved" && u.virtual !== "pending"
-                ? h("button.link.small", { type: "button", onclick: () => askVirtual(u) }, "申请虚拟人") : null,
+              u.virtual === "rejected" || (u.consent && u.virtual === "none")
+                ? h("button.link.small", { type: "button", onclick: () => askVirtual(u) }, u.virtual === "rejected" ? "重新申请" : "申请虚拟人") : null,
               h("button.link.small.text-error", { type: "button", onclick: () => removeUpload(u) }, "删除"))));
       })) : h("p.muted", "还没有上传过人物照片。"));
       return box;

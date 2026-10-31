@@ -38,8 +38,8 @@ const PERSON_TEXT = { real: "真人照片", virtual: "虚拟人" };
 export function refEntries(refs = {}) {
   const out = [];
   if (refs.pose) out.push(["姿势", refs.pose.thumb, refs.pose.thumb ? "" : "已下架"]);
-  if (refs.outfit?.thumb) out.push(["服装", refs.outfit.thumb, ""]);
-  else if (refs.outfit?.upload) out.push(["服装", null, "自定义服装"]);
+  if (refs.outfit?.thumb) out.push(["服装", refs.outfit.thumb, refs.outfit.upload ? "自定义服装" : ""]);
+  else if (refs.outfit?.upload) out.push(["服装", null, refs.outfit.id ? "自定义服装（已过期或删除）" : "自定义服装（不公开）"]);
   else if (refs.outfit) out.push(["服装", null, "已下架"]);
   if (refs.person) out.push(["人物", refs.person.thumb || null, PERSON_TEXT[refs.person.kind] || "人物"]);
   if (refs.scene) out.push(["场景", refs.scene.thumb, refs.scene.thumb ? "" : "已下架"]);
@@ -78,17 +78,20 @@ export function settingsText(gen) {
 // in the URL so the studio loads them fresh; the person goes in the draft.
 export function reuseInStudio(gen) {
   const refs = gen.refs || {};
+  const outfitUpload = refs.outfit?.upload && refs.outfit.id && refs.outfit.thumb
+    ? { id: refs.outfit.id, url: refs.outfit.url || refs.outfit.thumb, thumb: refs.outfit.thumb }
+    : null;
   const person = refs.person?.id && refs.person.thumb
     ? { source: refs.person.source, id: refs.person.id, url: refs.person.thumb, virtual: refs.person.kind === "virtual" }
     : null;
   draft.patch({ ratio: gen.ratio, tier: gen.tier, quality: gen.quality, n: gen.n, style: gen.style, scene: gen.scene,
-    prompt: gen.prompt || "", pose: null, outfit: null, outfitUpload: null, sceneAsset: null, items: [], person });
+    prompt: gen.prompt || "", pose: null, outfit: null, outfitUpload, sceneAsset: null, items: [], person });
   const params = new URLSearchParams();
   if (refs.pose?.id) params.set("pose", refs.pose.id);
-  if (refs.outfit?.id) params.set("outfit", refs.outfit.id);
+  if (refs.outfit?.id && !refs.outfit.upload) params.set("outfit", refs.outfit.id);
   if (refs.scene?.id) params.set("sceneId", refs.scene.id);
   if (refs.items?.length) params.set("items", refs.items.map((i) => i.id).join(","));
-  if (refs.outfit?.upload) toast("上传的服装图需要重新选择", { type: "error" });
+  if (refs.outfit?.upload && !outfitUpload) toast("上传的服装图已过期或删除，需要重新选择", { type: "error" });
   if (refs.person && !person) toast("人物照片已删除，需要重新选择", { type: "error" });
   navigate(`/studio${params.size ? `?${params}` : ""}`);
 }
@@ -110,12 +113,22 @@ export function cardSizeSwitch(list, storageKey) {
   list.dataset.size = size;
   return h("div.seg.size-seg", { role: "radiogroup", "aria-label": "卡片大小" }, SIZES.map(([value, text]) =>
     h("button", { type: "button", role: "radio", "aria-checked": String(value === size), "aria-pressed": String(value === size),
+      tabIndex: value === size ? 0 : -1,
+      onkeydown: (e) => {
+        const buttons = [...e.currentTarget.parentElement.querySelectorAll("button")];
+        const index = buttons.indexOf(e.currentTarget);
+        const step = ["ArrowRight", "ArrowDown"].includes(e.key) ? 1 : ["ArrowLeft", "ArrowUp"].includes(e.key) ? -1 : 0;
+        const target = e.key === "Home" ? buttons[0] : e.key === "End" ? buttons.at(-1)
+          : step ? buttons[(index + step + buttons.length) % buttons.length] : null;
+        if (target) { e.preventDefault(); target.focus(); target.click(); }
+      },
       title: `${text}卡片`, onclick: (e) => {
         list.dataset.size = value;
         try { localStorage.setItem(storageKey, value); } catch { /* private mode */ }
         e.currentTarget.parentElement.querySelectorAll("button").forEach((b) => {
           b.setAttribute("aria-checked", String(b === e.currentTarget));
           b.setAttribute("aria-pressed", String(b === e.currentTarget));
+          b.tabIndex = b === e.currentTarget ? 0 : -1;
         });
       } }, text)));
 }

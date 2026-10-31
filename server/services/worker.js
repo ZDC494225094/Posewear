@@ -11,6 +11,7 @@ import * as assetJobs from "./asset-jobs.js";
 import * as fees from "./asset-fees.js";
 import { InputError } from "./asset-jobs.js";
 import { providerFor, ProviderError, PUBLIC_MESSAGES } from "./providers/index.js";
+import { summarizeFailures } from "./providers/errors.js";
 import { finalizeImage } from "./image-post.js";
 import { apiCostUsd } from "./pricing.js";
 import { sizeForChannel } from "./sizes.js";
@@ -240,11 +241,12 @@ async function runJob(job) {
     } catch (err) {
       const perr = err instanceof ProviderError ? err
         : new ProviderError("transient", err?.message || String(err), { code: "INTERNAL", publicMessage: PUBLIC_MESSAGES.internal });
-      errors.push({ channel: channel.id, kind: perr.kind, code: perr.code, status: perr.status, message: perr.message });
+      errors.push({ channel: channel.id, kind: perr.kind, code: perr.code, status: perr.status, message: perr.message,
+        publicMessage: perr.publicMessage, detail: perr.detail || undefined });
       if (perr.kind === "user") {
         channels.markSuccess(channel.id); // the channel worked; the request was refused
         fail(job, { code: perr.code || "REJECTED", publicMessage: perr.publicMessage || PUBLIC_MESSAGES.rejected,
-          detail: JSON.stringify(errors) + (perr.detail ? `\n${perr.detail}` : "") });
+          detail: JSON.stringify(errors) });
         log.info(`Generation ${job.id} rejected by model: ${perr.code} ${perr.message}`);
         return;
       }
@@ -262,10 +264,5 @@ async function runJob(job) {
     log.info(`Generation ${job.id} will retry in ${Math.round(delay / 1000)}s (attempt ${job.attempts}/${gen.maxAttempts})`);
     return;
   }
-  const last = errors.at(-1);
-  fail(job, {
-    code: last?.kind === "channel" ? "CHANNEL_ERROR" : "UPSTREAM_ERROR",
-    publicMessage: transient ? PUBLIC_MESSAGES.busy : PUBLIC_MESSAGES.unavailable,
-    detail: JSON.stringify(errors)
-  });
+  fail(job, summarizeFailures(errors));
 }
