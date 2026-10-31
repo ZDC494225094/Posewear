@@ -215,6 +215,12 @@ test("admins manage scenes: sample photos with a virtual couple are public while
   assert.equal((await admin.del(`/api/admin/wedding/scenes/${created.data.scene.id}`)).status, 200);
   const shoots = await admin.get("/api/admin/wedding/shoots");
   assert.equal(shoots.data.total, 2);
+  // A real seed queues dozens of jobs in one admin action, past the per-minute submit limit.
+  const run = await admin.post("/api/admin/wedding/seed");
+  assert.equal(run.status, 201, JSON.stringify(run.data));
+  assert.ok(run.data.plates >= 12 && run.data.outfits === 16, JSON.stringify(run.data));
+  const again = (await admin.get("/api/admin/wedding/seed")).data;
+  assert.deepEqual([again.plates, again.samples, again.outfits], [0, 0, 0], "queued work is not planned twice");
 });
 
 test("deleting an album removes its photos and the couple's uploads", async () => {

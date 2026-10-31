@@ -343,7 +343,7 @@ router.get("/admin/assets/:id/info", (req, res) => {
 
 // ---------- 婚纱影楼
 
-router.get("/admin/wedding/scenes", (req, res) => res.json({ items: wedding.adminScenes() }));
+router.get("/admin/wedding/scenes", (req, res) => res.json({ items: wedding.adminScenes(), options: wedding.sceneOptions() }));
 
 router.post("/admin/wedding/scenes", (req, res) => {
   const scene = wedding.saveScene(null, req.body || {});

@@ -158,8 +158,8 @@ function assetName(r) {
   return [r.minor.name_zh, variant, r.description].filter(Boolean).join(" · ").slice(0, 36);
 }
 
-export function createJobs(user, input, { admin = false, ip = null } = {}) {
-  enforce(`assetgen:${user.id}`, 12, 60_000, "提交太频繁，请稍后再试");
+export function createJobs(user, input, { admin = false, ip = null, limit = true } = {}) {
+  if (limit) enforce(`assetgen:${user.id}`, 12, 60_000, "提交太频繁，请稍后再试");
   const r = validate(user, input, { admin });
   return insertJobs(user, [r], { admin, ip, publish: input.publish, license: input.license });
 }
@@ -167,8 +167,8 @@ export function createJobs(user, input, { admin = false, ip = null } = {}) {
 // Several different assets in one go, e.g. police, nurse and worker uniforms,
 // or one category in several variants. Each row becomes one job and one image;
 // identical rows are refused. Credits are taken for all rows or none.
-export function createBatch(user, input, { admin = false, ip = null } = {}) {
-  enforce(`assetgen:${user.id}`, 12, 60_000, "提交太频繁，请稍后再试");
+export function createBatch(user, input, { admin = false, ip = null, limit = true } = {}) {
+  if (limit) enforce(`assetgen:${user.id}`, 12, 60_000, "提交太频繁，请稍后再试");
   const items = Array.isArray(input.items) ? input.items : [];
   const max = admin ? 60 : 20;
   if (!items.length) throw badRequest("INVALID_INPUT", "请至少选择一个要生成的素材");

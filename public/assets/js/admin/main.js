@@ -25,6 +25,11 @@ const NAV = [
     ["/admin/virtual-persons", "虚拟人审核", "person", "green", () => import("./pages/virtual-persons.js")],
     ["/admin/safety", "内容安全", "shield", "green", () => import("./pages/safety.js")]
   ]],
+  ["婚纱影楼", [
+    ["/admin/wedding-shoots", "婚纱相册", "heart", "pink", () => import("./pages/wedding-shoots.js")],
+    ["/admin/wedding-scenes", "婚纱场景", "camera", "purple", () => import("./pages/wedding-scenes.js")],
+    ["/admin/wedding-settings", "套系与提示词", "sliders", "orange", () => import("./pages/wedding-settings.js")]
+  ]],
   ["配置", [
     ["/admin/channels", "AI 渠道", "bolt", "orange", () => import("./pages/channels.js")],
     ["/admin/generation", "生成与计费", "sliders", "gray", () => import("./pages/generation.js")],

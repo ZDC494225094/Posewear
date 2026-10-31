@@ -29,6 +29,7 @@ function navLinks(config) {
   const links = [
     ["/studio", "创作"],
     ["/library", "素材库"],
+    config?.wedding?.enabled ? ["/wedding", "婚纱影楼"] : null,
     config?.showcase?.enabled ? ["/explore", "灵感广场"] : null,
     ["/pricing", "价格"]
   ].filter(Boolean);
@@ -41,6 +42,7 @@ function userMenu(user) {
     h("div.user-menu-head", h("strong", user.nickname), h("span.faint.small", user.email)),
     item("/works", "我的作品", "photos", "blue"),
     item("/my-assets", "我的素材", "wand", "purple"),
+    item("/wedding/albums", "婚纱相册", "heart", "pink"),
     item("/account", "账户与点数", "person", "green"),
     item("/pricing", "充值", "gem", "orange"),
     user.role === "admin" ? item("/admin", "管理后台", "sliders", "gray") : null,

@@ -584,6 +584,17 @@ export function downloadList(user, shootId) {
 
 // ---------- admin: scenes, samples, seed, shoots
 
+// Choices for the scene editor: categories, outfit categories and styling.
+export function sceneOptions() {
+  const minors = (role) => (taxonomy.tree("outfit").find((m) => m.key === OUTFIT_MAJORS[role])?.children || [])
+    .map((c) => ({ key: c.key, name: c.zh }));
+  return {
+    categories: CATEGORIES,
+    outfits: { bride: minors("bride"), groom: minors("groom") },
+    styling: Object.fromEntries(Object.entries(STYLING).map(([kind, list]) => [kind, list.map(([key, name]) => ({ key, name }))]))
+  };
+}
+
 export function adminScenes() {
   return db.prepare("SELECT * FROM wedding_scenes ORDER BY sort, id").all().map((s) => sceneDto(s, { admin: true }));
 }
@@ -655,13 +666,13 @@ export function deleteScene(id) {
 
 // The empty location plate, made by the asset generator as a platform scene
 // asset under 婚礼场景.
-export function generatePlate(admin, id, { ip = null } = {}) {
+export function generatePlate(admin, id, { ip = null, limit = true } = {}) {
   const scene = sceneRow(id);
   if (!scene) throw notFound("场景不存在");
   const minor = taxonomy.minor("scene", "wedding", scene.category);
   if (!minor) throw badRequest("INVALID_CATEGORY", "缺少「婚礼场景」分类，请先在素材分类里恢复");
   const [job] = assetJobs.createJobs(admin, { type: "scene", categoryId: minor.id, publish: true,
-    description: [scene.prompt, scene.light].filter(Boolean).join("; "), name: `${scene.name}（婚纱场景）` }, { admin: true, ip });
+    description: [scene.prompt, scene.light].filter(Boolean).join("; "), name: `${scene.name}（婚纱场景）` }, { admin: true, ip, limit });
   db.prepare("UPDATE wedding_scenes SET plate_job_id = ?, plate_asset_id = NULL, updated_at = ? WHERE id = ?").run(job.id, Date.now(), scene.id);
   return job;
 }
@@ -729,7 +740,10 @@ export function seed(admin, { dryRun = true, ip = null } = {}) {
       .get(`sample:${s.id}`).n;
     return { scene: s, missing: Math.max(0, 2 - have) };
   }).filter((x) => x.missing);
-  const outfits = ["bride", "groom"].flatMap((role) => outfitOptions(role, viewer).filter((o) => !o.assets.length)
+  // Categories whose outfit image is already being made.
+  const pending = new Set(db.prepare(`SELECT json_extract(params, '$.categoryId') AS c FROM generations
+    WHERE kind = 'asset' AND status IN ('queued','running')`).all().map((r) => r.c));
+  const outfits = ["bride", "groom"].flatMap((role) => outfitOptions(role, viewer).filter((o) => !o.assets.length && !pending.has(o.categoryId))
     .map((o) => ({ role, categoryId: o.categoryId })));
   const sampleCount = samples.reduce((n, x) => n + x.missing, 0);
   const assetCfg = settings.get("assets");
@@ -742,9 +756,10 @@ export function seed(admin, { dryRun = true, ip = null } = {}) {
   // queued now use text descriptions where no outfit image exists yet.
   for (const role of ["bride", "groom"]) {
     const items = outfits.filter((o) => o.role === role).map((o) => ({ categoryId: o.categoryId, gender: role === "bride" ? "female" : "male" }));
-    if (items.length) assetJobs.createBatch(admin, { type: "outfit", items, publish: true }, { admin: true, ip });
+    if (items.length) assetJobs.createBatch(admin, { type: "outfit", items, publish: true }, { admin: true, ip, limit: false });
   }
-  for (const s of plates) generatePlate(admin, s.id, { ip });
+  // One seed is one admin action, so the per-minute submit limit does not apply.
+  for (const s of plates) generatePlate(admin, s.id, { ip, limit: false });
   for (const x of samples) generateSamples(admin, x.scene.id, x.missing, { ip });
   return result;
 }

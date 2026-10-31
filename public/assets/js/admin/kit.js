@@ -179,8 +179,8 @@ export function statusPill(text, tone = "") {
   return h("span.pill", { class: tone ? `pill-${tone}` : "" }, text);
 }
 
-export function drawer(title, content, { width = 640 } = {}) {
-  const m = modal({ title, content });
+export function drawer(title, content, { width = 640, onClose } = {}) {
+  const m = modal({ title, content, onClose });
   m.el.classList.add("a-drawer");
   m.el.style.width = `min(${width}px, 100%)`;
   m.el.parentElement.classList.add("a-drawer-backdrop");
