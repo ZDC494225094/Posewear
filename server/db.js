@@ -590,3 +590,7 @@ export function migrate() {
 }
 
 export const tx = (fn) => db.transaction(fn);
+
+// Migrate as soon as the database opens: some services prepare statements
+// when they are imported, so the tables must exist before any of them loads.
+migrate();
