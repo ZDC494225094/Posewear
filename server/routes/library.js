@@ -19,8 +19,7 @@ router.get("/library/meta", (req, res) => {
 router.get("/library/taxonomy", (req, res) => {
   const admin = req.user?.role === "admin";
   res.json({
-    pose: taxonomy.tree("pose", { admin, forUser: !admin }),
-    outfit: taxonomy.tree("outfit", { admin, forUser: !admin }),
+    ...Object.fromEntries(library.ASSET_TYPES.map((type) => [type, taxonomy.tree(type, { admin, forUser: !admin })])),
     angles: library.ANGLES
   });
 });
@@ -34,17 +33,20 @@ router.get("/library/poses", (req, res) => {
   }, viewerOf(req), { offset, limit: size }));
 });
 
-router.get("/library/outfits", (req, res) => {
-  const { offset, size } = v.page(req.query, { defaultSize: 48, maxSize: 96 });
-  res.json(library.queryOutfits({
-    series: text(req.query.series), category: text(req.query.category), q: text(req.query.q, 60),
-    origin: origin(req.query.origin), license: license(req.query.license)
-  }, viewerOf(req), { offset, limit: size }));
-});
+// Outfits, scenes and items share one listing.
+for (const [path, type] of [["outfits", "outfit"], ["scenes", "scene"], ["items", "item"]]) {
+  router.get(`/library/${path}`, (req, res) => {
+    const { offset, size } = v.page(req.query, { defaultSize: 48, maxSize: 96 });
+    res.json(library.queryFlat(type, {
+      series: text(req.query.series), category: text(req.query.category), q: text(req.query.q, 60),
+      origin: origin(req.query.origin), license: license(req.query.license)
+    }, viewerOf(req), { offset, limit: size }));
+  });
+}
 
 router.get("/library/random", (req, res) => {
   const item = library.random({
-    type: req.query.type === "outfit" ? "outfit" : "pose",
+    type: library.ASSET_TYPES.includes(req.query.type) ? req.query.type : "pose",
     series: text(req.query.series), category: text(req.query.category),
     includeDuo: v.bool(req.query.duo), forAI: v.bool(req.query.forAI, true), withPerson: v.bool(req.query.withPerson),
     exclude: text(req.query.exclude, 120)

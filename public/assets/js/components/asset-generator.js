@@ -5,8 +5,9 @@ import { modal, toast, toastError, busy } from "../core/ui.js";
 import { selectMenu } from "../core/select.js";
 import { number } from "../core/format.js";
 
-// The "generate an asset" dialog, shared by 我的素材 and the admin library.
-// Users pay per image; admin jobs are free and make platform assets.
+// The "generate an asset" dialog (poses, outfits, scenes, items), shared by
+// 我的素材 and the admin library. Users pay per image; admin jobs are free and
+// make platform assets.
 
 let treeCache = null;
 export function taxonomy({ fresh = false } = {}) {
@@ -27,13 +28,24 @@ export function categoryOptions(tree, { generatable = false } = {}) {
   ]);
 }
 
+const TYPES = [["pose", "姿势"], ["outfit", "服装"], ["scene", "场景"], ["item", "物品"]];
 const PLACEHOLDER = {
   pose: "例如：双手叉腰，重心在左腿，头微微向右偏",
-  outfit: "例如：正红色齐胸襦裙，金色披帛，盘发簪花"
+  outfit: "例如：正红色齐胸襦裙，金色披帛，盘发簪花",
+  scene: "例如：黄昏的江边步道，远处有拱桥，路灯刚亮",
+  item: "例如：珍珠吊坠项链，细金链，吊坠是一颗水滴形珍珠"
 };
 const REF_HINT = {
   pose: "上传一张人物照片，按其中的姿势画成线稿模特",
-  outfit: "上传一张服装照片，按素材规格重新渲染这套衣服"
+  outfit: "上传一张服装照片，按素材规格重新渲染这套衣服",
+  scene: "上传一张地点照片，去掉其中的人物，做成背景图",
+  item: "上传一张物品照片，重新拍成浅灰背景的产品图"
+};
+const SPEC_TEXT = {
+  pose: "线稿模特，900 × 1200，白底。",
+  outfit: "隐形模特展示的整套服装，1366 × 2048，浅灰背景。",
+  scene: "没有人物的背景照片，1536 × 1024 横幅。",
+  item: "单件物品的产品图，1024 × 1024，浅灰背景。"
 };
 
 // source: an existing pose to add camera angles to.
@@ -47,7 +59,7 @@ export async function openAssetGenerator({ admin = false, type = "pose", source 
     file: null, consent: false, publish: true, license: "commercial",
     extraAngles: source ? angles.map((a) => a.key).filter((k) => !(source.groupAngles || []).includes(k)) : []
   };
-  const unit = () => (admin ? 0 : state.type === "pose" ? cfg.poseCredits : cfg.outfitCredits);
+  const unit = () => (admin ? 0 : cfg[`${state.type}Credits`] ?? 0);
   const count = () => (source ? state.extraAngles.length : state.n);
 
   const body = h("div.stack.agen");
@@ -104,11 +116,11 @@ export async function openAssetGenerator({ admin = false, type = "pose", source 
     const description = h("textarea.textarea.input-filled", { rows: 3, maxLength: 300, value: state.description,
       placeholder: PLACEHOLDER[state.type], oninput: (e) => { state.description = e.target.value; } });
     replace(body,
-      seg("素材类型", [{ value: "pose", text: "姿势" }, { value: "outfit", text: "服装" }], state.type,
+      seg("素材类型", TYPES.map(([value, text]) => ({ value, text })), state.type,
         (v) => { if (v !== state.type) { state.type = v; state.categoryId = null; render(); } }),
       field("分类", selectMenu({ label: "分类", value: state.categoryId, filled: true, searchable: true,
         options: categoryOptions(list, { generatable: true }), onChange: (v) => { state.categoryId = v; } }).node,
-        state.type === "pose" ? "线稿模特，900 × 1200，白底。" : "隐形模特展示的整套服装，1366 × 2048，浅灰背景。"),
+        SPEC_TEXT[state.type]),
       field("描述（选填）", description, "不写描述时，按分类随机设计。"),
       state.type === "pose" && !state.file ? field("拍摄角度", seg("拍摄角度", angles.map((a) => ({ value: a.key, text: a.zh })), state.angle,
         (v) => { state.angle = v; render(); }), "先生成一个角度，满意后可以补全其他角度。") : null,

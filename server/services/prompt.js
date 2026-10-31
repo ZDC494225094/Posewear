@@ -4,12 +4,16 @@ const fill = (template, values) =>
   String(template || "").replace(/\{(\w+)\}/g, (all, key) => (key in values ? String(values[key]) : all));
 
 // Assemble the model prompt from the admin-editable template lines. The image
-// numbers here must match the order images are sent in: pose, outfit, person.
-export function buildPrompt({ pose, outfit, outfitKeywords = "", person = false, style, scene, userText = "" }) {
+// numbers here must match the order images are sent in: pose, outfit, person,
+// scene, items. personKind is "none", "real" (a real person's photo) or
+// "virtual". A scene image replaces the scene preset.
+export function buildPrompt({ pose, outfit, outfitKeywords = "", personKind = "none", style, scene, sceneAsset = null,
+  items = [], userText = "" }) {
   const p = settings.get("prompt");
   const lines = [];
   let n = 0;
-  const hasImages = !!(pose || outfit || person);
+  const person = personKind !== "none";
+  const hasImages = !!(pose || outfit || person || sceneAsset || items.length);
   lines.push(hasImages ? p.intro : p.textOnlyIntro);
   if (pose) lines.push(fill(pose.people > 1 ? p.poseDuo : p.pose, { n: ++n }));
   if (outfit) {
@@ -19,13 +23,23 @@ export function buildPrompt({ pose, outfit, outfitKeywords = "", person = false,
   }
   if (person) {
     lines.push(fill(p.person, { n: ++n }));
-    if (p.personSafety) lines.push(p.personSafety);
+    const safety = personKind === "real" ? p.personSafety : p.virtualPersonSafety;
+    if (safety) lines.push(safety);
   }
+  if (sceneAsset) lines.push(fill(p.sceneImage, { n: ++n }));
+  for (const item of items) lines.push(fill(p.item, { n: ++n, name: itemName(item) }));
   if (style?.prompt) lines.push(fill(p.style, { value: style.prompt }));
-  if (scene?.prompt) lines.push(fill(p.scene, { value: scene.prompt }));
+  if (scene?.prompt && !sceneAsset) lines.push(fill(p.scene, { value: scene.prompt }));
   if (userText) lines.push(fill(p.user, { value: userText }));
   lines.push(p.outro);
   return lines.map((line) => line.trim()).filter(Boolean).join("\n");
+}
+
+// What an item is, in English, for its prompt line: the category, then the
+// asset's own English name.
+function itemName(item) {
+  const name = item._category?.en || item.category_en || item.name_en || "accessory";
+  return String(name).toLowerCase();
 }
 
 // Banned-word screen for user text. CJK terms match as substrings; Latin terms

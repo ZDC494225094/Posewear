@@ -2,10 +2,12 @@ import { db } from "../db.js";
 import { badRequest, notFound } from "../lib/errors.js";
 import { randomId } from "../lib/crypto.js";
 
-// The two-level category tree (大类 → 小类) for poses and outfits. Assets
+// The two-level category tree (大类 → 小类) for every asset type. Assets
 // reference it by key: series = major key, category = minor key. Small
 // enough to keep in memory; rebuilt after every edit.
 
+// Poses, outfits, scenes (backgrounds) and items (accessories and props).
+export const ASSET_TYPES = ["pose", "outfit", "scene", "item"];
 const RATINGS = ["general", "suggestive", "explicit"];
 const KEY = /^[\p{L}\p{N}][\p{L}\p{N}_\-・]{0,39}$/u;
 let cache = null;
@@ -94,7 +96,7 @@ function clean(input, existing) {
 
 export function create(input) {
   const type = input.type;
-  if (!["pose", "outfit"].includes(type)) throw badRequest("INVALID_INPUT", "类型不正确");
+  if (!ASSET_TYPES.includes(type)) throw badRequest("INVALID_INPUT", "类型不正确");
   const parent = input.parentId ? get(input.parentId) : null;
   if (input.parentId && (!parent || parent.type !== type || parent.parent_id !== null)) {
     throw badRequest("INVALID_INPUT", "上级分类不存在");

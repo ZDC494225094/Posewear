@@ -2,8 +2,8 @@ import { h, cicon } from "../core/dom.js";
 import { modal, toast, copyText } from "../core/ui.js";
 
 // Reference board export, carried over from the original ai-reference-gallery
-// compositor: pose, outfit and optional person side by side on one canvas,
-// proportions kept, no cropping. Free, runs entirely in the browser, for
+// compositor: pose, outfit and the optional person, scene and items side by
+// side on one canvas, proportions kept, no cropping. Free, runs entirely in the browser, for
 // people who want to take the board to another AI tool.
 
 function loadImage(src) {
@@ -55,34 +55,33 @@ export async function drawBoard(canvas, entries, { background = "white", labels 
   return canvas;
 }
 
-export function boardPrompt({ pose, outfit, person }) {
-  const pos = person ? ["左侧", "中间", "右侧"] : ["左侧", "右侧"];
-  const poseId = pose?.id || "姿势参考";
-  const outfitId = outfit?.id || "服装参考";
-  if (person) {
-    return `请根据这张三图参考板生成一张完整的人物作品，每张图片的用途不同：\n\n` +
-      `1. 姿势参考：画面${pos[0]}（${poseId}），参考身体姿态、动作和四肢位置。\n` +
-      `2. 服装参考：画面${pos[1]}（${outfitId}），参考款式、配色、材质和配饰。\n` +
-      `3. 人物参考：画面${pos[2]}，尽量保持照片中人物可辨认的面部特征与发型，不照搬原照片的服装和姿势。\n` +
-      `4. 将三项参考自然融合为一张新作品，人物比例协调、细节清晰，不要输出参考板拼贴。`;
-  }
-  return `请根据我提供的组合参考图创作一幅完整、自然的人物画面。\n\n` +
-    `1. 姿势参考：画面${pos[0]}（${poseId}）。遵循人物的姿态、动作方向、手脚位置及互动关系。\n` +
-    `2. 服装参考：画面${pos[1]}（${outfitId}）。保留衣服的廓形、配色、材质与重要配饰。\n` +
-    `3. 如另外提供了主角脸部参考图，请以该图片为准保持面部特征一致。\n` +
-    `4. 将服装与动作自然结合，画面比例协调、细节清晰，不要把两张参考图简单拼接作为成品。`;
+// One line per image, numbered left to right as they sit on the board.
+const ROLE_TEXT = {
+  pose: (code) => `姿势参考${code ? `（${code}）` : ""}：参考身体姿态、动作方向、手脚位置和互动关系。`,
+  outfit: (code) => `服装参考${code ? `（${code}）` : ""}：保留衣服的廓形、配色、材质和重要配饰。`,
+  person: () => "人物参考：尽量保持人物可辨认的面部特征和发型，不照搬原图的服装和姿势。",
+  scene: () => "场景参考：把人物放进这个地点，保留环境、光线和氛围。",
+  item: () => "物品参考：让人物自然地佩戴或手持这件物品，保留它的形状、颜色和材质。"
+};
+
+export function boardPrompt(entries) {
+  const lines = entries.map((e, i) => `${i + 1}. 从左数第 ${i + 1} 张是${ROLE_TEXT[e.role](e.code)}`);
+  return `请根据这张参考板生成一张完整的人物作品，每张图片的用途不同：\n\n${lines.join("\n")}\n` +
+    `${entries.length + 1}. 把各项参考自然融合成一张新作品，人物比例协调、细节清晰，不要输出参考板拼贴。`;
 }
 
-export function openBoardDialog({ pose, outfit, outfitUpload, person }) {
+export function openBoardDialog({ pose, outfit, outfitUpload, person, sceneAsset, items = [] }) {
   const entries = [];
-  if (pose) entries.push({ src: pose.preview, code: pose.id });
-  if (outfit) entries.push({ src: outfit.preview, code: outfit.id });
-  else if (outfitUpload) entries.push({ src: outfitUpload.url, code: "" });
-  if (person) entries.push({ src: person.url, code: "" });
+  if (pose) entries.push({ role: "pose", src: pose.preview, code: pose.id });
+  if (outfit) entries.push({ role: "outfit", src: outfit.preview, code: outfit.id });
+  else if (outfitUpload) entries.push({ role: "outfit", src: outfitUpload.url, code: "" });
+  if (person) entries.push({ role: "person", src: person.url, code: "" });
+  if (sceneAsset) entries.push({ role: "scene", src: sceneAsset.preview, code: sceneAsset.id });
+  for (const item of items) entries.push({ role: "item", src: item.preview, code: item.id });
   const options = { background: "white", labels: true };
   const canvas = h("canvas.board-canvas", { "aria-label": "参考板预览" });
   const status = h("p.small.muted", { "aria-live": "polite" }, "正在排版…");
-  const promptText = boardPrompt({ pose, outfit: outfit || (outfitUpload ? { id: "上传的服装" } : null), person });
+  const promptText = boardPrompt(entries);
   const redraw = async () => {
     try {
       await drawBoard(canvas, entries, options);
@@ -96,7 +95,7 @@ export function openBoardDialog({ pose, outfit, outfitUpload, person }) {
     content: h("div.board-dialog",
       h("div.board-stage", canvas),
       h("div.board-side",
-        h("p.muted.small", "把姿势、服装和人物照片拼成一张参考图，附带提示词，可以拿到其他支持图片参考的 AI 工具使用。导出不消耗点数。"),
+        h("p.muted.small", "把选好的姿势、服装、人物、场景和物品拼成一张参考图，附带提示词，可以拿到其他支持图片参考的 AI 工具使用。导出不消耗点数。"),
         h("div.field", h("span", "画布背景"),
           h("div.chips", [["white", "白色"], ["soft", "浅灰"]].map(([value, text]) =>
             h("button.chip", { type: "button", "aria-pressed": String(options.background === value), onclick: (e) => {

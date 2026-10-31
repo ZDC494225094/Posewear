@@ -23,7 +23,10 @@ export function uploadFile(row) {
 // Kinds: person (identity reference), outfit (one-off clothing reference) and
 // reference (input for generating a library asset). People may appear in
 // person and reference images, so both need consent and are kept briefly.
-export async function saveUpload(user, kind, file, { consent = false } = {}) {
+// A person image may instead be declared virtual (an AI-made or original
+// character): it then needs no consent, but can't be used until an admin
+// approves it (admins' own uploads are approved at once).
+export async function saveUpload(user, kind, file, { consent = false, virtual = false } = {}) {
   const gen = settings.get("generation");
   if (!["person", "outfit", "reference"].includes(kind)) throw badRequest("INVALID_INPUT", "上传类型不正确");
   if (kind === "person" && !gen.allowPersonPhoto) throw forbidden("当前未开放人物照片功能", "PERSON_DISABLED");
@@ -31,7 +34,8 @@ export async function saveUpload(user, kind, file, { consent = false } = {}) {
   if (kind === "reference" && !settings.get("assets").userGeneration && user.role !== "admin") {
     throw forbidden("素材生成暂未开放", "ASSET_GEN_DISABLED");
   }
-  if (kind === "person" && !consent) {
+  const asVirtual = kind === "person" && virtual;
+  if (kind === "person" && !consent && !asVirtual) {
     throw badRequest("CONSENT_REQUIRED", "请先确认照片是你本人，或已获得照片中成年人的授权");
   }
   if (kind === "reference" && !consent) {
@@ -71,16 +75,20 @@ export async function saveUpload(user, kind, file, { consent = false } = {}) {
   const safety = settings.get("safety");
   const days = photo ? safety.personRetentionDays : safety.outfitRetentionDays;
   const now = Date.now();
-  db.prepare(`INSERT INTO uploads (id, user_id, kind, path, mime, width, height, bytes, consent_at, created_at, expires_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, user.id, kind, rel.replaceAll("\\", "/"), mime,
-    encoded.info.width, encoded.info.height, encoded.data.length, photo ? now : null, now, now + days * DAY);
+  const approved = asVirtual && user.role === "admin";
+  db.prepare(`INSERT INTO uploads (id, user_id, kind, path, mime, width, height, bytes, consent_at, created_at, expires_at,
+    virtual, virtual_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, user.id, kind, rel.replaceAll("\\", "/"), mime,
+    encoded.info.width, encoded.info.height, encoded.data.length, photo && !asVirtual ? now : null, now,
+    approved ? null : now + days * DAY, asVirtual ? (approved ? "approved" : "pending") : "none", asVirtual ? now : null);
   return dto(db.prepare("SELECT * FROM uploads WHERE id = ?").get(id));
 }
 
 export function dto(row) {
   return {
     id: row.id, kind: row.kind, width: row.width, height: row.height, bytes: row.bytes,
-    url: `/media/uploads/${row.id}`, createdAt: row.created_at, expiresAt: row.expires_at
+    url: `/media/uploads/${row.id}`, thumb: `/media/uploads/${row.id}/thumb`,
+    consent: !!row.consent_at, virtual: row.virtual, virtualNote: row.virtual_note,
+    createdAt: row.created_at, expiresAt: row.expires_at
   };
 }
 
@@ -100,6 +108,26 @@ export function listUploads(user, kind) {
     .all(user.id, kind, Date.now()).map(dto);
 }
 
+// Ask for (or give up) virtual status on a person photo. Approved photos are
+// kept until the owner deletes them; going back to a real-person photo
+// restarts the normal retention.
+export function setVirtual(user, id, wanted, { declare = false } = {}) {
+  const row = getOwnedUpload(user, id, "person");
+  if (wanted) {
+    if (!declare) throw badRequest("DECLARATION_REQUIRED", "请先确认图中不是真实存在的人");
+    if (row.virtual !== "approved") {
+      const approved = user.role === "admin";
+      db.prepare("UPDATE uploads SET virtual = ?, virtual_note = '', virtual_at = ?, expires_at = ? WHERE id = ?")
+        .run(approved ? "approved" : "pending", Date.now(), approved ? null : row.expires_at, row.id);
+    }
+  } else if (row.virtual !== "none") {
+    const days = settings.get("safety").personRetentionDays;
+    db.prepare("UPDATE uploads SET virtual = 'none', virtual_note = '', expires_at = ? WHERE id = ?")
+      .run(row.expires_at ?? Date.now() + days * DAY, row.id);
+  }
+  return dto(db.prepare("SELECT * FROM uploads WHERE id = ?").get(row.id));
+}
+
 export function deleteUpload(user, id) {
   const row = db.prepare("SELECT * FROM uploads WHERE id = ? AND user_id = ?").get(String(id || ""), user.id);
   if (!row || row.deleted_at) throw notFound("图片不存在");
@@ -116,3 +144,35 @@ export function purgeExpired() {
   for (const row of rows) removeUploadFile(row);
   return rows.length;
 }
+
+// ---------- admin review of virtual persons
+
+export function listVirtual({ status, offset, size }) {
+  const where = ["u.kind = 'person'", "u.deleted_at IS NULL", "(u.expires_at IS NULL OR u.expires_at > ?)"];
+  const params = [Date.now()];
+  if (status) { where.push("u.virtual = ?"); params.push(status); }
+  else where.push("u.virtual != 'none'");
+  const sql = where.join(" AND ");
+  const total = db.prepare(`SELECT COUNT(*) AS n FROM uploads u WHERE ${sql}`).get(...params).n;
+  const items = db.prepare(`SELECT u.*, us.email AS user_email FROM uploads u JOIN users us ON us.id = u.user_id
+    WHERE ${sql} ORDER BY u.virtual_at DESC LIMIT ? OFFSET ?`).all(...params, size, offset)
+    .map((row) => ({ ...dto(row), userId: row.user_id, userEmail: row.user_email, virtualAt: row.virtual_at }));
+  return { total, items };
+}
+
+export function reviewVirtual(id, { approve, note }) {
+  const row = db.prepare("SELECT * FROM uploads WHERE id = ? AND kind = 'person' AND deleted_at IS NULL").get(String(id));
+  if (!row || row.virtual === "none") throw notFound("没有这条虚拟人申请");
+  if (approve) {
+    db.prepare("UPDATE uploads SET virtual = 'approved', virtual_note = '', expires_at = NULL WHERE id = ?").run(row.id);
+  } else {
+    // Rejected photos fall back to the normal retention.
+    const days = settings.get("safety").personRetentionDays;
+    db.prepare("UPDATE uploads SET virtual = 'rejected', virtual_note = ?, expires_at = ? WHERE id = ?")
+      .run(String(note || "").trim().slice(0, 200), row.expires_at ?? Date.now() + days * DAY, row.id);
+  }
+  return dto(db.prepare("SELECT * FROM uploads WHERE id = ?").get(row.id));
+}
+
+export const pendingVirtualCount = () => db.prepare(`SELECT COUNT(*) AS n FROM uploads WHERE kind = 'person'
+  AND virtual = 'pending' AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at > ?)`).get(Date.now()).n;

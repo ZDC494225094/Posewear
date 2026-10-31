@@ -372,13 +372,120 @@ const migrations = [
     CREATE INDEX idx_uploads_user ON uploads(user_id, created_at DESC);
     CREATE INDEX idx_uploads_expires ON uploads(expires_at);
     `);
-    seedCategories(conn);
+    seedCategories(conn, ["pose", "outfit"]);
     // Imported outfits get a major category (大类) so they sit in the tree.
     const setSeries = conn.prepare(`UPDATE assets SET series = ?, series_zh = ?, series_en = ?
       WHERE type = 'outfit' AND series = '' AND category = ?`);
     for (const [category, key] of Object.entries(UPSTREAM_OUTFIT_SERIES)) {
       const major = OUTFIT_TREE.find((m) => m.key === key);
       setSeries.run(key, major.zh, major.en, category);
+    }
+  },
+
+  // 3: scene and item assets; works can use a scene image, items, and a person
+  // taken from the user's own works; virtual-person uploads; hiding and
+  // favouriting works.
+  (conn) => {
+    // CHECK constraints can't be altered, so the asset and category tables are
+    // rebuilt to accept the new types. Foreign keys are checked at commit.
+    conn.pragma("defer_foreign_keys = ON");
+    const assetColumns = `id, type, group_key, code, series, series_zh, series_en, category, category_zh, category_en,
+      category_ja, name, name_zh, name_en, angle, angle_zh, angle_en, keywords, people, root, thumb_path, preview_path,
+      original_path, rating, enabled, sort, source, use_count, created_at, updated_at, owner_id, license, visibility,
+      review, review_note, price, earned, job_id, published_at`;
+    conn.exec(`
+    CREATE TABLE assets_v3 (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL CHECK (type IN ('pose', 'outfit', 'scene', 'item')),
+      group_key TEXT NOT NULL,
+      code TEXT NOT NULL DEFAULT '',
+      series TEXT NOT NULL DEFAULT '',
+      series_zh TEXT NOT NULL DEFAULT '',
+      series_en TEXT NOT NULL DEFAULT '',
+      category TEXT NOT NULL DEFAULT '',
+      category_zh TEXT NOT NULL DEFAULT '',
+      category_en TEXT NOT NULL DEFAULT '',
+      category_ja TEXT NOT NULL DEFAULT '',
+      name TEXT NOT NULL DEFAULT '',
+      name_zh TEXT NOT NULL DEFAULT '',
+      name_en TEXT NOT NULL DEFAULT '',
+      angle TEXT NOT NULL DEFAULT '',
+      angle_zh TEXT NOT NULL DEFAULT '',
+      angle_en TEXT NOT NULL DEFAULT '',
+      keywords TEXT NOT NULL DEFAULT '',
+      people INTEGER NOT NULL DEFAULT 1,
+      root TEXT NOT NULL DEFAULT 'library' CHECK (root IN ('library', 'custom')),
+      thumb_path TEXT NOT NULL,
+      preview_path TEXT NOT NULL DEFAULT '',
+      original_path TEXT NOT NULL,
+      rating TEXT NOT NULL DEFAULT 'general' CHECK (rating IN ('general', 'suggestive', 'explicit')),
+      enabled INTEGER NOT NULL DEFAULT 1,
+      sort INTEGER NOT NULL DEFAULT 0,
+      source TEXT NOT NULL DEFAULT 'upstream',
+      use_count INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      owner_id INTEGER REFERENCES users(id),
+      license TEXT NOT NULL DEFAULT 'commercial' CHECK (license IN ('commercial', 'noncommercial')),
+      visibility TEXT NOT NULL DEFAULT 'public' CHECK (visibility IN ('public', 'private')),
+      review TEXT NOT NULL DEFAULT 'none' CHECK (review IN ('none', 'pending', 'approved', 'rejected')),
+      review_note TEXT NOT NULL DEFAULT '',
+      price INTEGER NOT NULL DEFAULT 0 CHECK (price >= 0),
+      earned INTEGER NOT NULL DEFAULT 0,
+      job_id TEXT,
+      published_at INTEGER
+    );
+    INSERT INTO assets_v3 (${assetColumns}) SELECT ${assetColumns} FROM assets;
+    DROP TABLE assets;
+    ALTER TABLE assets_v3 RENAME TO assets;
+    CREATE INDEX idx_assets_type ON assets(type, sort);
+    CREATE INDEX idx_assets_group ON assets(group_key);
+    CREATE INDEX idx_assets_owner ON assets(owner_id, type);
+    CREATE INDEX idx_assets_review ON assets(review);
+
+    CREATE TABLE asset_categories_v3 (
+      id INTEGER PRIMARY KEY,
+      type TEXT NOT NULL CHECK (type IN ('pose', 'outfit', 'scene', 'item')),
+      parent_id INTEGER REFERENCES asset_categories_v3(id) ON DELETE CASCADE,
+      key TEXT NOT NULL,
+      name_zh TEXT NOT NULL,
+      name_en TEXT NOT NULL DEFAULT '',
+      hint TEXT NOT NULL DEFAULT '',
+      rating TEXT NOT NULL DEFAULT 'general' CHECK (rating IN ('general', 'suggestive', 'explicit')),
+      gen_enabled INTEGER NOT NULL DEFAULT 1,
+      sort INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    INSERT INTO asset_categories_v3 (id, type, parent_id, key, name_zh, name_en, hint, rating, gen_enabled, sort, created_at, updated_at)
+      SELECT id, type, parent_id, key, name_zh, name_en, hint, rating, gen_enabled, sort, created_at, updated_at
+      FROM asset_categories ORDER BY parent_id IS NOT NULL, id;
+    DROP TABLE asset_categories;
+    ALTER TABLE asset_categories_v3 RENAME TO asset_categories;
+    CREATE UNIQUE INDEX idx_cat_major ON asset_categories(type, key) WHERE parent_id IS NULL;
+    CREATE UNIQUE INDEX idx_cat_minor ON asset_categories(parent_id, key) WHERE parent_id IS NOT NULL;
+
+    -- person_kind: 'real' for a real person's photo (consent needed, never
+    -- published), 'virtual' for an approved virtual person or an image from a
+    -- work that used no real person.
+    ALTER TABLE generations ADD COLUMN scene_asset_id TEXT;
+    ALTER TABLE generations ADD COLUMN item_ids TEXT;
+    ALTER TABLE generations ADD COLUMN person_image_id TEXT;
+    ALTER TABLE generations ADD COLUMN person_kind TEXT NOT NULL DEFAULT 'none' CHECK (person_kind IN ('none', 'real', 'virtual'));
+    ALTER TABLE generations ADD COLUMN user_hidden INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE generations ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0;
+    UPDATE generations SET person_kind = 'real' WHERE person_upload_id IS NOT NULL;
+
+    -- A person upload the owner declared virtual (AI-made or an original
+    -- character); it counts as virtual only once an admin approves it.
+    ALTER TABLE uploads ADD COLUMN virtual TEXT NOT NULL DEFAULT 'none' CHECK (virtual IN ('none', 'pending', 'approved', 'rejected'));
+    ALTER TABLE uploads ADD COLUMN virtual_note TEXT NOT NULL DEFAULT '';
+    ALTER TABLE uploads ADD COLUMN virtual_at INTEGER;
+    `);
+    seedCategories(conn, ["scene", "item"]);
+    for (const table of ["assets", "asset_categories"]) {
+      const broken = conn.pragma(`foreign_key_check(${table})`);
+      if (broken.length) throw new Error(`Migration 3 left ${broken.length} broken foreign key(s) in ${table}`);
     }
   }
 ];

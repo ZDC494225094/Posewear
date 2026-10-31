@@ -1,5 +1,6 @@
 import express from "express";
 import fs from "node:fs";
+import sharp from "sharp";
 import { db } from "../db.js";
 import * as library from "../services/library.js";
 import * as settings from "../services/settings.js";
@@ -38,11 +39,24 @@ router.get("/library/:id/:variant", (req, res) => {
   });
 });
 
-router.get("/uploads/:id", (req, res) => {
+function ownUpload(req) {
   if (!req.user) throw unauthorized();
   const row = db.prepare("SELECT * FROM uploads WHERE id = ?").get(String(req.params.id));
   if (!row || row.deleted_at || (row.user_id !== req.user.id && req.user.role !== "admin")) throw notFound("图片不存在");
-  send(res, uploadFile(row), { cacheControl: "private, max-age=3600" });
+  return row;
+}
+
+router.get("/uploads/:id", (req, res) => {
+  send(res, uploadFile(ownUpload(req)), { cacheControl: "private, max-age=3600" });
+});
+
+// Small version for pickers and history lists, made on request.
+router.get("/uploads/:id/thumb", async (req, res) => {
+  const file = uploadFile(ownUpload(req));
+  if (!fs.existsSync(file)) throw notFound("图片不存在");
+  const buffer = await sharp(file).resize({ width: 360, height: 480, fit: "inside", withoutEnlargement: true })
+    .webp({ quality: 80 }).toBuffer();
+  res.set("Cache-Control", "private, max-age=3600").type("image/webp").send(buffer);
 });
 
 // Generated images: owner and admins always; others only for public works.

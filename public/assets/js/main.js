@@ -11,6 +11,7 @@ const routes = [
   { path: "/explore", load: () => import("./pages/explore.js"), title: "灵感广场" },
   { path: "/works", load: () => import("./pages/works.js"), title: "我的作品", auth: true },
   { path: "/my-assets", load: () => import("./pages/my-assets.js"), title: "我的素材", auth: true },
+  { path: "/my-assets/jobs", load: () => import("./pages/asset-jobs.js"), title: "素材生成记录", auth: true },
   { path: "/pricing", load: () => import("./pages/pricing.js"), title: "充值" },
   { path: "/pay/:id", load: () => import("./pages/pay.js"), title: "支付", auth: true },
   { path: "/account", load: () => import("./pages/account.js"), title: "账户", auth: true },

@@ -9,7 +9,7 @@ import * as v from "../lib/validate.js";
 export const router = express.Router();
 router.use("/my", requireUser);
 
-const typeOf = (value) => (["pose", "outfit"].includes(value) ? value : "");
+const typeOf = (value) => (library.ASSET_TYPES.includes(value) ? value : "");
 
 router.get("/my/assets", (req, res) => {
   const { offset, size } = v.page(req.query, { defaultSize: 48, maxSize: 96 });
@@ -17,6 +17,11 @@ router.get("/my/assets", (req, res) => {
     ...library.listOwned(req.user.id, { type: typeOf(req.query.type), offset, size }),
     summary: library.ownerSummary(req.user.id)
   });
+});
+
+// Generation details of one of the user's assets.
+router.get("/my/assets/:id/info", (req, res) => {
+  res.json(assetJobs.assetInfo(req.params.id, { userId: req.user.id }));
 });
 
 router.patch("/my/assets/:id", (req, res) => {
@@ -42,5 +47,6 @@ router.get("/my/asset-jobs", (req, res) => {
   const ids = String(req.query.ids || "").split(",").map((s) => s.trim()).filter(Boolean).slice(0, 50);
   if (ids.length) return res.json({ items: assetJobs.listJobs({ ids, userId: req.user.id }) });
   const { offset, size } = v.page(req.query, { defaultSize: 12, maxSize: 50 });
-  res.json(assetJobs.listJobs({ userId: req.user.id, status: req.query.status === "active" ? "active" : "", offset, size }));
+  res.json(assetJobs.listJobs({ userId: req.user.id, offset, size, type: typeOf(req.query.type),
+    status: ["active", "succeeded", "failed"].includes(req.query.status) ? req.query.status : "" }));
 });

@@ -1,8 +1,9 @@
 import { h, icon, tile, cicon, replace } from "../core/dom.js";
 import { api } from "../core/api.js";
-import { store } from "../core/store.js";
+import { store, draft } from "../core/store.js";
 import { toast, toastError, confirmDialog, lightbox, modal } from "../core/ui.js";
 import { relative, STATUS_TEXT, QUALITY_TEXT, number } from "../core/format.js";
+import { navigate } from "../core/nav.js";
 
 // Typical durations per quality, used only to pace the progress bar.
 const EXPECTED_SECONDS = { low: 25, medium: 55, high: 110 };
@@ -31,13 +32,36 @@ function waitingView(gen) {
   return { node, stop: () => clearInterval(timer) };
 }
 
+const PERSON_TEXT = { real: "真人照片", virtual: "虚拟人" };
+
+// Every reference a work used, labelled: [label, thumb url or null, chip text].
+export function refEntries(refs = {}) {
+  const out = [];
+  if (refs.pose) out.push(["姿势", refs.pose.thumb, refs.pose.thumb ? "" : "已下架"]);
+  if (refs.outfit?.thumb) out.push(["服装", refs.outfit.thumb, ""]);
+  else if (refs.outfit?.upload) out.push(["服装", null, "自定义服装"]);
+  else if (refs.outfit) out.push(["服装", null, "已下架"]);
+  if (refs.person) out.push(["人物", refs.person.thumb || null, PERSON_TEXT[refs.person.kind] || "人物"]);
+  if (refs.scene) out.push(["场景", refs.scene.thumb, refs.scene.thumb ? "" : "已下架"]);
+  for (const item of refs.items || []) out.push(["物品", item.thumb, item.thumb ? "" : "已下架"]);
+  return out;
+}
+
 function refThumbs(gen) {
-  const refs = [];
-  if (gen.refs?.pose?.thumb) refs.push(h("img", { src: gen.refs.pose.thumb, alt: "姿势参考", title: "姿势参考" }));
-  if (gen.refs?.outfit?.thumb) refs.push(h("img", { src: gen.refs.outfit.thumb, alt: "服装参考", title: "服装参考" }));
-  else if (gen.refs?.outfit?.upload) refs.push(h("span.ref-chip", "自定义服装"));
-  if (gen.refs?.person) refs.push(h("span.ref-chip", "人物照片"));
-  return refs.length ? h("div.gen-refs", refs) : null;
+  const entries = refEntries(gen.refs);
+  if (!entries.length) return null;
+  return h("div.gen-refs", entries.map(([name, thumb, chip]) => (thumb
+    ? h("img", { src: thumb, alt: `${name}参考`, title: chip ? `${name}（${chip}）` : `${name}参考` })
+    : h("span.ref-chip", { title: name }, chip))));
+}
+
+// The larger, labelled version for detail views.
+export function refBlock(refs) {
+  const entries = refEntries(refs);
+  if (!entries.length) return h("p.small.muted", "这张图只用了文字描述。");
+  return h("div.ref-block", entries.map(([name, thumb, chip]) => h("figure.ref-block-item",
+    thumb ? h("img", { src: thumb, alt: "" }) : h("span.ref-block-empty", chip),
+    h("figcaption", name, chip && thumb ? h("span.faint", ` · ${chip}`) : null))));
 }
 
 export function settingsText(gen) {
@@ -50,9 +74,60 @@ export function settingsText(gen) {
   return [gen.ratio, `${quality}画质`, tier && tier.multiplier !== 1 ? tier.label : null, style, scene].filter(Boolean).join(" · ");
 }
 
+// Send a work's references and settings back to the studio. Library assets go
+// in the URL so the studio loads them fresh; the person goes in the draft.
+export function reuseInStudio(gen) {
+  const refs = gen.refs || {};
+  const person = refs.person?.id && refs.person.thumb
+    ? { source: refs.person.source, id: refs.person.id, url: refs.person.thumb, virtual: refs.person.kind === "virtual" }
+    : null;
+  draft.patch({ ratio: gen.ratio, tier: gen.tier, quality: gen.quality, n: gen.n, style: gen.style, scene: gen.scene,
+    prompt: gen.prompt || "", pose: null, outfit: null, outfitUpload: null, sceneAsset: null, items: [], person });
+  const params = new URLSearchParams();
+  if (refs.pose?.id) params.set("pose", refs.pose.id);
+  if (refs.outfit?.id) params.set("outfit", refs.outfit.id);
+  if (refs.scene?.id) params.set("sceneId", refs.scene.id);
+  if (refs.items?.length) params.set("items", refs.items.map((i) => i.id).join(","));
+  if (refs.outfit?.upload) toast("上传的服装图需要重新选择", { type: "error" });
+  if (refs.person && !person) toast("人物照片已删除，需要重新选择", { type: "error" });
+  navigate(`/studio${params.size ? `?${params}` : ""}`);
+}
+
+// Use one image of a work as the person, keeping the rest of the studio as is.
+// It counts as virtual unless the work itself used a real person's photo.
+export function useAsPerson(gen, img) {
+  draft.patch({ person: { source: "image", id: img.id, url: img.thumb, virtual: gen.personKind !== "real" } });
+  toast(gen.personKind === "real" ? "已把这张图设为人物（含真人照片，作品仅自己可见）" : "已把这张图设为人物（虚拟人）", { type: "success" });
+  navigate("/studio");
+}
+
+// Card size for lists of works, remembered per page: s / m / l.
+const SIZES = [["s", "小"], ["m", "中"], ["l", "大"]];
+export function cardSizeSwitch(list, storageKey) {
+  let size = "m";
+  try { size = localStorage.getItem(storageKey) || "m"; } catch { /* private mode */ }
+  if (!SIZES.some(([v]) => v === size)) size = "m";
+  list.dataset.size = size;
+  return h("div.seg.size-seg", { role: "radiogroup", "aria-label": "卡片大小" }, SIZES.map(([value, text]) =>
+    h("button", { type: "button", role: "radio", "aria-checked": String(value === size), "aria-pressed": String(value === size),
+      title: `${text}卡片`, onclick: (e) => {
+        list.dataset.size = value;
+        try { localStorage.setItem(storageKey, value); } catch { /* private mode */ }
+        e.currentTarget.parentElement.querySelectorAll("button").forEach((b) => {
+          b.setAttribute("aria-checked", String(b === e.currentTarget));
+          b.setAttribute("aria-pressed", String(b === e.currentTarget));
+        });
+      } }, text)));
+}
+
+const actionButton = (iconName, color, text, onclick, { pressed } = {}) =>
+  h("button.btn.btn-ghost.gen-act", { type: "button", title: text, "aria-label": text, onclick,
+    ...(pressed !== undefined ? { "aria-pressed": String(pressed) } : {}) }, cicon(iconName, color), h("span.btn-label", text));
+
 // One generation job: progress while it runs, then the images. `onChange(gen | null)`
-// reports updates and deletion; `onReuse(gen)` refills the studio with its settings.
-export function genCard(gen, { onChange, onReuse } = {}) {
+// reports updates and removal. `keep(gen)` says whether the card still belongs
+// in its list after the user hides, unhides or unfavourites it.
+export function genCard(gen, { onChange, keep } = {}) {
   const root = h("article.gen", { dataset: { id: gen.id } });
   let waiting = null;
 
@@ -62,9 +137,10 @@ export function genCard(gen, { onChange, onReuse } = {}) {
     root.className = `gen is-${gen.status}`;
     const head = h("div.gen-head",
       h("span.gen-status", STATUS_TEXT[gen.status]),
-      h("span.gen-meta", settingsText(gen)),
       h("span.gen-time", relative(gen.createdAt)),
-      h("span.gen-cost.num", gen.refunded ? `${gen.refunded} 点已退回` : `${number(gen.cost)} 点`));
+      gen.favorite ? h("span.gen-fav", { title: "已收藏" }, icon("heart", 13)) : null,
+      h("span.gen-cost.num", gen.refunded ? `${gen.refunded} 点已退回` : `${number(gen.cost)} 点`),
+      h("span.gen-meta", settingsText(gen)));
     let body;
     if (gen.status === "queued" || gen.status === "running") {
       waiting = waitingView(gen);
@@ -82,12 +158,31 @@ export function genCard(gen, { onChange, onReuse } = {}) {
             h("a", { href: img.download, download: "", "data-native": "", title: "下载原图", "aria-label": `下载第 ${i + 1} 张` }, icon("download", 16))))));
     }
     const done = gen.status !== "queued" && gen.status !== "running";
-    const canPublish = store.config.showcase.enabled && gen.status === "succeeded" && !gen.refs?.person;
+    const canPublish = store.config.showcase.enabled && gen.status === "succeeded" && gen.personKind !== "real";
     const actions = h("div.gen-actions",
-      onReuse && done ? h("button.btn.btn-ghost", { type: "button", onclick: () => onReuse(gen) }, cicon("redo", "blue"), "再来一次") : null,
-      canPublish ? h("button.btn.btn-ghost", { type: "button", onclick: togglePublic }, cicon("share", "purple"), gen.isPublic ? "取消公开" : "公开") : null,
-      done ? h("button.btn.btn-ghost.btn-icon", { type: "button", "aria-label": "删除", title: "删除", onclick: remove }, cicon("trash", "red")) : null);
-    replace(root, head, body, h("div.gen-foot", refThumbs(gen), gen.prompt ? h("p.gen-prompt", gen.prompt) : h("span", { style: { flex: 1 } }), actions));
+      done ? actionButton("redo", "blue", "再来一次", () => reuseInStudio(gen)) : null,
+      canPublish ? actionButton("share", "purple", gen.isPublic ? "取消公开" : "公开", togglePublic) : null,
+      done ? actionButton("heart", "pink", gen.favorite ? "取消收藏" : "收藏", () => setFlag({ favorite: !gen.favorite }), { pressed: gen.favorite }) : null,
+      done ? actionButton(gen.userHidden ? "eye" : "eyeOff", "gray", gen.userHidden ? "取消隐藏" : "隐藏", () => setFlag({ hidden: !gen.userHidden })) : null,
+      done ? actionButton("trash", "red", "删除", remove) : null);
+    replace(root, head, body, h("div.gen-foot", refThumbs(gen), gen.prompt ? h("p.gen-prompt", gen.prompt) : null, actions));
+  }
+
+  async function setFlag(patch) {
+    try {
+      const { generation } = await api.post(`/api/generations/${gen.id}/flags`, patch);
+      gen = generation;
+      if (keep && !keep(gen)) {
+        waiting?.stop();
+        root.remove();
+        onChange?.(null);
+      } else {
+        render();
+        onChange?.(gen);
+      }
+      if (patch.hidden !== undefined) toast(gen.userHidden ? "已隐藏，可在「我的作品 → 已隐藏」里找回" : "已取消隐藏", { type: "success" });
+      else toast(gen.favorite ? "已收藏" : "已取消收藏", { type: "success" });
+    } catch (err) { toastError(err); }
   }
 
   async function togglePublic() {
@@ -148,12 +243,13 @@ export function reportDialog(generationId) {
   });
 }
 
-// Full-size viewer for the owner's work, with download and publish actions.
+// Full-size viewer for the owner's work: what it was made from, download,
+// publishing, and sending it back to the studio.
 export function openViewer(gen, start = 0, { onChange } = {}) {
   const items = gen.images.map((img, i) => ({ src: img.url, alt: `生成结果 ${i + 1}`, img }));
   return lightbox(items, start, {
     renderAside: (item, { close }) => {
-      const canPublish = store.config.showcase.enabled && !gen.refs?.person;
+      const canPublish = store.config.showcase.enabled && gen.personKind !== "real";
       const publish = canPublish ? h("button.btn.btn-block", { type: "button", onclick: async (e) => {
         const button = e.currentTarget;
         try {
@@ -164,17 +260,22 @@ export function openViewer(gen, start = 0, { onChange } = {}) {
           toast(gen.isPublic ? "已发布到灵感广场" : "已取消公开", { type: "success" });
         } catch (err) { toastError(err); }
       } }, cicon("share", "purple"), gen.isPublic ? "取消公开" : "发布到灵感广场") : null;
+      const allowPerson = store.config.generation.allowPersonPhoto || gen.personKind !== "real";
       return h("div.viewer-aside",
         h("p.viewer-title", settingsText(gen)),
         gen.prompt ? h("p.small.muted", gen.prompt) : null,
-        refThumbs(gen),
+        h("div.viewer-sec", h("p.viewer-sec-title", "所用参考"), refBlock(gen.refs)),
         gen.refs?.license ? h("p.small.muted", gen.refs.license === "commercial"
           ? "用到的素材均可商用。" : "用到了非商用素材，这张图仅限个人非商业用途。") : null,
         h("p.small.faint", `${item.img.width} × ${item.img.height} · ${item.img.format.toUpperCase()}`),
         h("div.viewer-actions",
           h("a.btn.btn-primary.btn-block", { href: item.img.download, download: "", "data-native": "" }, cicon("download", "green"), "下载原图"),
+          h("button.btn.btn-block", { type: "button", onclick: () => { close(); reuseInStudio(gen); } },
+            cicon("redo", "blue"), "用同样的参考再创作"),
+          allowPerson ? h("button.btn.btn-block", { type: "button", onclick: () => { close(); useAsPerson(gen, item.img); } },
+            cicon("person", "green"), "用这张图作人物继续创作") : null,
           publish,
-          gen.refs?.person ? h("p.small.muted", "使用了人物照片的作品仅自己可见，不能公开。") : null,
+          gen.personKind === "real" ? h("p.small.muted", "使用了真人照片的作品仅自己可见，不能公开。") : null,
           h("button.btn.btn-ghost.btn-block", { type: "button", onclick: close }, "关闭")));
     }
   });

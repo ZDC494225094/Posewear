@@ -14,7 +14,7 @@ import { flexibleSize } from "./sizes.js";
 import { aigcLabel } from "./image-post.js";
 import { addPngText } from "../lib/png-text.js";
 import { randomId } from "../lib/crypto.js";
-import { badRequest, forbidden, HttpError } from "../lib/errors.js";
+import { badRequest, forbidden, notFound, HttpError } from "../lib/errors.js";
 import { enforce } from "../lib/rate-limit.js";
 import { startOfLocalDay } from "../lib/time.js";
 import * as v from "../lib/validate.js";
@@ -24,10 +24,13 @@ import * as v from "../lib/validate.js";
 // as studio works. Admin jobs make commercial platform assets; user jobs make
 // private assets the owner may later share.
 
-// Output specs, matching the imported catalog.
+// Output specs. Poses and outfits match the imported catalog; scenes are
+// landscape photos, items square product shots.
 export const SPEC = {
   pose: { ratio: "3:4", width: 900, height: 1200, thumb: [300, 400] },
-  outfit: { ratio: "2:3", width: 1366, height: 2048, thumb: [360, 540] }
+  outfit: { ratio: "2:3", width: 1366, height: 2048, thumb: [360, 540] },
+  scene: { ratio: "3:2", width: 1536, height: 1024, thumb: [480, 320] },
+  item: { ratio: "1:1", width: 1024, height: 1024, thumb: [400, 400] }
 };
 const ANGLE_KEYS = library.ANGLES.map((a) => a.key);
 const angleOf = (key) => library.ANGLES.find((a) => a.key === key) || library.ANGLES[0];
@@ -51,9 +54,7 @@ export function fillTemplate(template, values) {
 
 function buildPrompt({ type, major, minor, description, angle, withRef, fromPose }) {
   const cfg = settings.get("assets");
-  const template = type === "pose"
-    ? (fromPose ? cfg.poseAnglePrompt : withRef ? cfg.poseRefPrompt : cfg.posePrompt)
-    : (withRef ? cfg.outfitRefPrompt : cfg.outfitPrompt);
+  const template = type === "pose" && fromPose ? cfg.poseAnglePrompt : cfg[`${type}${withRef ? "RefPrompt" : "Prompt"}`];
   return fillTemplate(template, {
     category: minor ? `${minor.name_en || minor.name_zh} (${minor.name_zh}), part of ${major.name_en || major.name_zh} (${major.name_zh})` : "",
     hint: minor?.hint || major?.hint || "",
@@ -89,7 +90,7 @@ function validate(user, input, { admin }) {
     return { type: "pose", source, angles, description: "" };
   }
 
-  const type = v.oneOf(input.type, "type", ["pose", "outfit"]);
+  const type = v.oneOf(input.type, "type", library.ASSET_TYPES);
   const minor = taxonomy.get(Number(input.categoryId));
   if (!minor || minor.type !== type || !minor.parent_id) throw badRequest("INVALID_CATEGORY", "请选择素材的小类");
   if (!taxonomy.generatable(minor, { admin })) throw badRequest("CATEGORY_CLOSED", "这个分类暂不开放生成");
@@ -103,8 +104,7 @@ function validate(user, input, { admin }) {
 
 export function unitCost(type, { admin = false } = {}) {
   if (admin) return 0;
-  const cfg = settings.get("assets");
-  return type === "pose" ? cfg.poseCredits : cfg.outfitCredits;
+  return settings.get("assets")[`${type}Credits`] ?? 0;
 }
 
 export function createJobs(user, input, { admin = false, ip = null } = {}) {
@@ -164,7 +164,7 @@ export function createJobs(user, input, { admin = false, ip = null } = {}) {
         angle: step.angle, withRef: !!r.ref, fromPose: !!source });
       if (cost > 0) {
         credits.adjust(user.id, -cost, "asset_generation", { refType: "generation", refId: id,
-          note: `${r.type === "pose" ? "姿势" : "服装"}素材 ${step.n} 张 · ${categoryLabel}` });
+          note: `${library.TYPE_LABELS[r.type]}素材 ${step.n} 张 · ${categoryLabel}` });
       }
       insert.run(id, user.id, r.ref || source ? "edit" : "generate", JSON.stringify(params), r.ref?.id || null,
         source?.id || null, r.description, prompt, SPEC[r.type].ratio, cfg.tier, size, cfg.quality, step.n, cost, ip, Date.now());
@@ -193,7 +193,7 @@ export function jobDto(row, { admin = false } = {}) {
 }
 
 // Jobs by ids, or a page of jobs (one user's, or all for the admin view).
-export function listJobs({ ids, userId, status, scope, admin = false, offset = 0, size = 20 }) {
+export function listJobs({ ids, userId, status, scope, type, admin = false, offset = 0, size = 20 }) {
   const where = ["g.kind = 'asset'"];
   const params = [];
   if (ids) {
@@ -206,6 +206,7 @@ export function listJobs({ ids, userId, status, scope, admin = false, offset = 0
   else if (status) { where.push("g.status = ?"); params.push(status); }
   if (scope === "platform") where.push("json_extract(g.params, '$.platform') = 1");
   if (scope === "user") where.push("json_extract(g.params, '$.platform') = 0");
+  if (type) { where.push("json_extract(g.params, '$.type') = ?"); params.push(type); }
   const sql = where.join(" AND ");
   const rows = db.prepare(`SELECT g.*, u.email AS user_email, c.name AS channel_name FROM generations g
     JOIN users u ON u.id = g.user_id LEFT JOIN channels c ON c.id = g.channel_id
@@ -214,6 +215,34 @@ export function listJobs({ ids, userId, status, scope, admin = false, offset = 0
   if (ids) return items;
   const total = db.prepare(`SELECT COUNT(*) AS n FROM generations g WHERE ${sql}`).get(...params).n;
   return { total, items };
+}
+
+// What made an asset: its generation job's category, description, reference
+// image and the pose it extends. Uploaded and imported assets have no job.
+export function assetInfo(assetId, { admin = false, userId = null } = {}) {
+  const asset = library.getAsset(assetId);
+  if (!asset || (!admin && asset.owner_id !== userId)) throw notFound("素材不存在");
+  const toDto = admin ? library.adminDto : library.ownerDto;
+  const row = asset.job_id
+    ? db.prepare(`SELECT g.*, u.email AS user_email FROM generations g JOIN users u ON u.id = g.user_id
+        WHERE g.id = ? AND g.kind = 'asset'`).get(asset.job_id)
+    : null;
+  if (!row) return { asset: toDto(asset), job: null };
+  const p = JSON.parse(row.params || "{}");
+  const ref = row.ref_upload_id ? db.prepare("SELECT deleted_at, expires_at FROM uploads WHERE id = ?").get(row.ref_upload_id) : null;
+  const refAlive = ref && !ref.deleted_at && (!ref.expires_at || ref.expires_at > Date.now());
+  const source = row.source_asset_id ? library.getAsset(row.source_asset_id) : null;
+  return {
+    asset: toDto(asset),
+    job: {
+      id: row.id, category: p.categoryLabel, description: p.description,
+      angle: p.type === "pose" ? angleOf(p.angle) : null,
+      reference: row.ref_upload_id ? { thumb: refAlive ? `/media/uploads/${row.ref_upload_id}/thumb` : null } : null,
+      source: source ? toDto(source) : row.source_asset_id ? { id: row.source_asset_id } : null,
+      createdAt: row.created_at, finishedAt: row.finished_at,
+      ...(admin ? { userEmail: row.user_email, platform: !!p.platform, promptFinal: row.prompt_final, apiCostUsd: row.api_cost_usd } : {})
+    }
+  };
 }
 
 // ---------- worker hooks
@@ -233,27 +262,28 @@ export function inputFiles(job) {
   return [];
 }
 
-// Fit a model output to the library spec: poses on white, outfits on their
-// own background colour; PNG original with the AIGC label, WebP thumb/preview.
+// Fit a model output to the library spec: poses on white, outfits and items on
+// their own background colour, scenes cropped to fill the frame; PNG original
+// with the AIGC label, WebP thumb and (photos only) preview.
 async function writeFiles(type, id, buffer, generationId) {
   const spec = SPEC[type];
   const dir = path.join(library.customRoot, type, id);
   fs.mkdirSync(dir, { recursive: true });
   const input = sharp(buffer, { limitInputPixels: 80_000_000 });
   let background = { r: 255, g: 255, b: 255 };
-  if (type === "outfit") {
+  if (type === "outfit" || type === "item") {
     const corner = await input.clone().extract({ left: 0, top: 0, width: 1, height: 1 }).removeAlpha().raw().toBuffer();
     background = { r: corner[0], g: corner[1], b: corner[2] };
   }
   let pipeline = input.clone().flatten({ background })
-    .resize({ width: spec.width, height: spec.height, fit: "contain", background, kernel: "lanczos3" });
+    .resize({ width: spec.width, height: spec.height, fit: type === "scene" ? "cover" : "contain", background, kernel: "lanczos3" });
   if (type === "pose") pipeline = pipeline.greyscale().toColourspace("srgb");
   let original = await pipeline.png({ compressionLevel: 9 }).toBuffer();
   if (settings.get("safety").aigcMetadata) original = addPngText(original, "AIGC", aigcLabel({ imageId: id, generationId }));
   fs.writeFileSync(path.join(dir, "original.png"), original);
   await sharp(original).resize({ width: spec.thumb[0], height: spec.thumb[1], fit: "contain", background })
     .webp({ quality: 82 }).toFile(path.join(dir, "thumb.webp"));
-  if (type === "outfit") await sharp(original).webp({ quality: 88 }).toFile(path.join(dir, "preview.webp"));
+  if (type !== "pose") await sharp(original).webp({ quality: 88 }).toFile(path.join(dir, "preview.webp"));
 }
 
 function assetFields(job, p, id, i, count) {
@@ -266,8 +296,8 @@ function assetFields(job, p, id, i, count) {
     id, type: p.type, group_key: p.groupKey || id, ...p.columns,
     name, name_zh: name, name_en: name,
     angle: angle?.key || "", angle_zh: angle?.zh || "", angle_en: angle?.en || "",
-    keywords: p.type === "outfit" ? p.description : "",
-    thumb_path: `${p.type}/${id}/thumb.webp`, preview_path: p.type === "outfit" ? `${p.type}/${id}/preview.webp` : "",
+    keywords: p.type === "pose" ? "" : p.description,
+    thumb_path: `${p.type}/${id}/thumb.webp`, preview_path: p.type === "pose" ? "" : `${p.type}/${id}/preview.webp`,
     original_path: `${p.type}/${id}/original.png`,
     rating: p.rating, enabled: p.publish ? 1 : 0, sort, source: "ai",
     owner_id: p.platform ? null : job.user_id, license: p.license,
@@ -280,7 +310,7 @@ export async function saveResults(job, result, channel, size) {
   const images = result.images.slice(0, job.n);
   const made = [];
   for (const image of images) {
-    const id = `${p.type === "pose" ? "gp" : "go"}_${randomId(10)}`;
+    const id = `g${library.ID_PREFIX[p.type]}_${randomId(10)}`;
     await writeFiles(p.type, id, image, job.id);
     made.push(id);
   }

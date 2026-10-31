@@ -107,6 +107,19 @@ async function loadInputs(job) {
     const row = db.prepare("SELECT * FROM uploads WHERE id = ?").get(job.person_upload_id);
     if (!row || row.deleted_at) throw new InputError("人物照片已被删除");
     images.push({ ...(await prepare(uploads.uploadFile(row), { lineArt: false, maxEdge })), name: "person" });
+  } else if (job.person_image_id) {
+    const row = db.prepare("SELECT path FROM generation_images WHERE id = ?").get(job.person_image_id);
+    if (!row || !fs.existsSync(imageFile(row.path))) throw new InputError("作为人物的作品图片已被删除");
+    images.push({ ...(await prepare(imageFile(row.path), { lineArt: false, maxEdge })), name: "person" });
+  }
+  // Scene and items follow the person, in the order the prompt numbers them.
+  const extras = [...(job.scene_asset_id ? [[job.scene_asset_id, "scene", "场景"]] : []),
+    ...JSON.parse(job.item_ids || "[]").map((id, i) => [id, `item-${i + 1}`, "物品"])];
+  for (const [id, name, label] of extras) {
+    const asset = library.getAsset(id);
+    const file = asset && library.aiSourceFile(asset);
+    if (!file || !fs.existsSync(file)) throw new InputError(`${label}参考图文件缺失`);
+    images.push({ ...(await prepare(file, { lineArt: false, maxEdge })), name });
   }
   return images.map((img) => ({ ...img, name: `${img.name}.${img.ext}` }));
 }

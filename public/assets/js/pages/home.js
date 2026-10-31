@@ -4,27 +4,39 @@ import { store, draft } from "../core/store.js";
 import { label, number, yuan } from "../core/format.js";
 import { navigate } from "../core/nav.js";
 
-// Hero visual: pose + outfit = finished image, laid out as three cards on a
-// frosted panel. The pair can be reshuffled or sent straight to the studio.
-function heroStage(pairs, featured) {
+// Hero visual: pose + outfit = the image actually generated from them, taken
+// from public works. "换一组" moves to the next example; "用这组开始" sends the
+// pair to the studio. With no examples yet, empty frames explain the idea.
+function heroStage(combos) {
+  if (!combos.length) {
+    const empty = (iconName, color, text) => h("div.formula-frame", h("div.result-placeholder", tile(iconName, color, "lg"), h("span", text)));
+    return h("div.hero-stage.glass",
+      h("div.formula",
+        h("figure.formula-card.is-pose", empty("pose", "purple", "选一个姿势"), h("figcaption", tile("pose", "purple"), h("span", "姿势"))),
+        h("span.formula-op", { "aria-hidden": "true" }, "+"),
+        h("figure.formula-card.is-outfit", empty("shirt", "pink", "挑一套服装"), h("figcaption", tile("shirt", "pink"), h("span", "服装"))),
+        h("span.formula-op", { "aria-hidden": "true" }, "="),
+        h("figure.formula-card.is-result", empty("sparkle", "orange", "AI 成片"), h("figcaption", tile("sparkle", "orange"), h("span", "AI 成片")))),
+      h("div.hero-stage-foot", h("a.btn.btn-primary", { href: "/studio" }, cicon("sparkle", "yellow"), "去创作台试试")));
+  }
   let index = 0;
   const poseImg = h("img", { alt: "姿势参考", decoding: "async" });
   const outfitImg = h("img", { alt: "服装参考", decoding: "async" });
+  const resultImg = h("img", { alt: "用这组姿势和服装生成的成片", decoding: "async" });
   const poseCap = h("span");
   const outfitCap = h("span");
-  const result = featured?.images?.[0];
   function show() {
-    const pair = pairs[index % pairs.length];
-    if (!pair) return;
-    poseImg.src = pair.pose.preview;
-    outfitImg.src = pair.outfit.preview;
-    poseCap.textContent = `姿势 · ${label(pair.pose.category)}`;
-    outfitCap.textContent = `服装 · ${label(pair.outfit.category)}`;
+    const c = combos[index % combos.length];
+    poseImg.src = c.pose.preview;
+    outfitImg.src = c.outfit.preview;
+    resultImg.src = c.result.thumb;
+    poseCap.textContent = `姿势 · ${label(c.pose.category)}`;
+    outfitCap.textContent = `服装 · ${label(c.outfit.category)}`;
   }
   show();
   const useIt = () => {
-    const pair = pairs[index % pairs.length];
-    if (pair) draft.patch({ pose: pair.pose, outfit: pair.outfit, outfitUpload: null });
+    const c = combos[index % combos.length];
+    draft.patch({ pose: c.pose, outfit: c.outfit, outfitUpload: null, sceneAsset: null, items: [], style: c.style || "", ratio: c.ratio });
     navigate("/studio");
   };
   return h("div.hero-stage.glass",
@@ -33,14 +45,10 @@ function heroStage(pairs, featured) {
       h("span.formula-op", { "aria-hidden": "true" }, "+"),
       h("figure.formula-card.is-outfit", h("div.formula-frame", outfitImg), h("figcaption", tile("shirt", "pink"), outfitCap)),
       h("span.formula-op", { "aria-hidden": "true" }, "="),
-      h("figure.formula-card.is-result",
-        h("div.formula-frame", result
-          ? h("img", { src: result.thumb, alt: "AI 成片示例" })
-          : h("div.result-placeholder", tile("sparkle", "orange", "lg"), h("span", "AI 成片"))),
-        h("figcaption", tile("sparkle", "orange"), h("span", "AI 成片")))),
-    pairs.length ? h("div.hero-stage-foot",
-      pairs.length > 1 ? h("button.btn.btn-white", { type: "button", onclick: () => { index += 1; show(); } }, cicon("shuffle", "purple"), "换一组") : null,
-      h("button.btn.btn-primary", { type: "button", onclick: useIt }, cicon("sparkle", "yellow"), "用这组开始")) : null);
+      h("figure.formula-card.is-result", h("div.formula-frame", resultImg), h("figcaption", tile("sparkle", "orange"), h("span", "AI 成片")))),
+    h("div.hero-stage-foot",
+      combos.length > 1 ? h("button.btn.btn-white", { type: "button", onclick: () => { index += 1; show(); } }, cicon("shuffle", "purple"), "换一组") : null,
+      h("button.btn.btn-primary", { type: "button", onclick: useIt }, cicon("sparkle", "yellow"), "用这组开始")));
 }
 
 function bento(counts, cfg) {
@@ -58,7 +66,7 @@ function bento(counts, cfg) {
     h("article.bento-card.is-dark",
       tile("person", "green", "lg"),
       h("h3", "保持同一张脸"),
-      h("p", "上传本人或已授权的照片，成片保留五官和发型。")),
+      h("p", "用本人或已授权的照片、审核通过的虚拟人，或自己作品里的人物，成片保留五官和发型。")),
     h("article.bento-card",
       tile("expand", "blue", "lg"),
       h("h3", "最高 2K 高清"),
@@ -70,14 +78,14 @@ function bento(counts, cfg) {
     h("article.bento-card.is-wide",
       tile("shield", "indigo", "lg"),
       h("h3", "合规与隐私"),
-      h("p", "人物照片到期自动删除，带人物的作品仅自己可见；每张图都带 AI 生成标识。")));
+      h("p", "真人照片到期自动删除，用了真人照片的作品仅自己可见；每张图都带 AI 生成标识。")));
 }
 
 function steps() {
   const items = [
     ["挑一个姿势", "在姿势库里选，或者随机抽一个。"],
     ["选一套衣服", "从服装库挑，或上传自己的衣服照片。"],
-    ["加上人物（可选）", "上传照片，让成片保留这张脸。"],
+    ["加上人物（可选）", "上传照片或从作品里挑一个人物，让成片保留这张脸。"],
     ["点击生成", "选好画幅和画质，几十秒出图。"]
   ];
   return h("ol.steps", items.map(([title, text], i) =>
@@ -123,7 +131,7 @@ function faq(cfg) {
   const items = [
     ["生成一张要多少点数？", `按画质计费：${cost}；选 2K 等更高清晰度时按倍率增加。生成前按钮上会显示本次消耗。`],
     ["生成失败会扣点数吗？", "不会。被安全审核拦截、模型繁忙或任何原因失败，扣除的点数都会自动退回。"],
-    ["人物照片安全吗？", `照片只用于你发起的任务，${cfg.generation.personRetentionDays} 天后自动删除。用了人物照片的作品只有你自己能看到，不能公开发布。`],
+    ["人物照片安全吗？", `照片只用于你发起的任务，${cfg.generation.personRetentionDays} 天后自动删除。用了真人照片的作品只有你自己能看到，不能公开发布；审核通过的虚拟人形象不受这个限制。`],
     ["生成的图片可以商用吗？", "可以用于个人或商业用途，但需自行确保不侵犯他人肖像权、著作权等权益，并保留图片上的“AI生成”标识。"],
     ["支持哪些尺寸？", "支持 2:3、3:4、1:1、9:16、16:9 等常用画幅，标准和 2K 高清两档清晰度。"]
   ];
@@ -134,7 +142,7 @@ function faq(cfg) {
 
 export async function render() {
   const cfg = store.config;
-  let data = { featured: [], recent: [], pairs: [], packages: [] };
+  let data = { combos: [], featured: [], recent: [], packages: [] };
   try { data = await api.get("/api/public/home"); } catch { /* render without samples */ }
   const counts = cfg.library;
   const bonus = cfg.auth.signupBonus;
@@ -148,7 +156,7 @@ export async function render() {
           h("a.btn.btn-primary.btn-lg", { href: "/studio" }, cicon("sparkle", "yellow", 18), "开始创作"),
           h("a.link.link-arrow", { href: "/library" }, "浏览素材库")),
         h("p.hero-note", store.user ? `你还有 ${number(store.user.credits)} 点可用` : bonus ? `新用户注册送 ${bonus} 点 · 失败自动退点` : "注册即可开始创作")),
-      heroStage(data.pairs, data.featured[0])));
+      heroStage(data.combos)));
 
   const pricing = data.packages.length ? h("section.section.wrap", { "aria-labelledby": "home-pricing" },
     h("div.section-head", h("div", h("h2#home-pricing", "按需充值"), h("p", "点数长期有效，用多少买多少。")),

@@ -1,6 +1,7 @@
-// Initial category tree, inserted once by migration 2. Admins edit it later in
-// 后台 → 素材分类. Each minor category carries an English hint that the asset
-// generator adds to its prompt.
+// Initial category trees: poses and outfits are inserted by migration 2,
+// scenes and items by migration 3. Admins edit them later in 后台 → 素材分类.
+// Each minor category carries an English hint that the asset generator adds
+// to its prompt.
 //   [key, 中文名, English name, hint, rating?]
 // Pose keys reuse the imported catalog's series/category keys so imported and
 // generated poses share one tree. Restricted (explicit) series are not seeded.
@@ -178,17 +179,197 @@ export const OUTFIT_TREE = [
   }
 ];
 
+// Scenes are empty locations used as the background of a work. Inserted by
+// migration 3. Hints describe the setting; the generator adds "no people".
+export const SCENE_TREE = [
+  {
+    key: "studio", zh: "影棚背景", en: "Studio backdrops",
+    children: [
+      ["seamless", "纯色背景", "Seamless backdrop", "a seamless paper backdrop in one soft colour, evenly lit, with a gentle floor curve"],
+      ["gradient", "渐变背景", "Gradient backdrop", "a smooth colour-gradient studio backdrop with soft vignetting"],
+      ["set", "布景影棚", "Studio set", "a styled photo-studio set with a few simple props, plinths or arches, soft key light"],
+      ["window-light", "窗光影棚", "Window-light studio", "a bright studio room with large windows, sheer curtains and soft natural light"]
+    ]
+  },
+  {
+    key: "indoor", zh: "室内生活", en: "Indoor spaces",
+    children: [
+      ["bedroom", "卧室", "Bedroom", "a tidy, cosy bedroom with a made bed, warm lamps and soft textiles"],
+      ["living-room", "客厅", "Living room", "a bright, modern living room with a sofa, rug, plants and large windows"],
+      ["cafe", "咖啡馆", "Café", "a cosy café interior with wooden tables, warm window light and a coffee bar"],
+      ["restaurant", "餐厅", "Restaurant", "an elegant restaurant interior with set tables and warm ambient lighting"],
+      ["office", "办公室", "Office", "a modern open-plan office with desks, glass walls and daylight"],
+      ["classroom", "教室", "Classroom", "a classroom with rows of desks, a blackboard and afternoon sunlight"],
+      ["library", "图书馆", "Library", "a quiet library with tall wooden bookshelves and reading tables"],
+      ["gym", "健身房", "Gym", "a clean modern gym with equipment, mirrors and bright lighting"]
+    ]
+  },
+  {
+    key: "urban", zh: "城市街景", en: "City",
+    children: [
+      ["street", "街道", "Street", "a lively city street with shopfronts and crossings"],
+      ["rooftop", "天台", "Rooftop", "a city rooftop terrace at golden hour with the skyline behind"],
+      ["night-city", "城市夜景", "City at night", "a city street at night with neon signs, wet pavement and reflections"],
+      ["subway", "地铁站", "Subway station", "a clean subway station platform with tiled walls and fluorescent light"],
+      ["riverside", "江边步道", "Riverside walk", "a riverside promenade with railings, trees and a bridge in the distance"],
+      ["alley", "老街小巷", "Old alley", "a narrow old alley with brick walls, potted plants and hanging lanterns"]
+    ]
+  },
+  {
+    key: "nature", zh: "自然风光", en: "Nature",
+    children: [
+      ["beach", "海边", "Beach", "a sunny sandy beach with gentle waves and a clear sky"],
+      ["forest", "森林", "Forest", "a sunlit forest path with tall trees and dappled light"],
+      ["flower-field", "花海", "Flower field", "a wide field of blooming flowers under a soft sky"],
+      ["cherry-blossom", "樱花", "Cherry blossoms", "a park path lined with cherry trees in full blossom, petals in the air"],
+      ["snow", "雪景", "Snow", "a quiet snowy landscape with frosted pine trees and soft overcast light"],
+      ["grassland", "草原", "Grassland", "rolling green grassland under a big sky with drifting clouds"],
+      ["lake", "湖边", "Lakeside", "a calm lakeside with a wooden pier and mountains reflected in the water"],
+      ["desert", "沙漠", "Desert", "golden sand dunes at sunset with long shadows"]
+    ]
+  },
+  {
+    key: "chinese", zh: "古风场景", en: "Classical Chinese",
+    children: [
+      ["palace", "宫殿", "Palace hall", "a grand Chinese palace hall with red pillars, golden roof tiles and carved beams"],
+      ["garden", "园林", "Classical garden", "a classical Chinese garden with a moon gate, rockery, pond and covered walkway"],
+      ["bamboo", "竹林", "Bamboo grove", "a dense green bamboo grove with mist and soft light"],
+      ["water-town", "江南水乡", "Water town", "a Jiangnan water town with stone bridges, canals and white-walled houses"],
+      ["pavilion", "亭台楼阁", "Pavilion", "a wooden pavilion by a lotus pond with upturned eaves"],
+      ["teahouse", "茶馆", "Teahouse", "a traditional teahouse interior with wooden furniture, lattice windows and tea sets"]
+    ]
+  },
+  {
+    key: "western", zh: "欧式场景", en: "European settings",
+    children: [
+      ["castle", "城堡", "Castle", "a stone castle courtyard with towers and banners"],
+      ["ballroom", "宫廷舞厅", "Ballroom", "an ornate palace ballroom with chandeliers, mirrors and a polished floor"],
+      ["old-town", "欧洲小镇", "European old town", "a cobblestone street in a European old town with pastel houses and flower boxes"],
+      ["courtyard", "花园庭院", "Garden courtyard", "a formal European garden courtyard with a fountain and clipped hedges"],
+      ["paris-cafe", "巴黎街角", "Parisian café", "a Parisian street corner café with bistro chairs and an awning"]
+    ]
+  },
+  {
+    key: "fantasy", zh: "幻想场景", en: "Fantasy",
+    children: [
+      ["celestial", "仙境云海", "Celestial realm", "a celestial realm above a sea of clouds with floating pavilions and waterfalls"],
+      ["enchanted-forest", "魔法森林", "Enchanted forest", "an enchanted forest with glowing mushrooms, fireflies and soft magical light"],
+      ["cyberpunk", "赛博朋克", "Cyberpunk city", "a cyberpunk megacity street with holograms, neon and rain"],
+      ["space", "太空站", "Space station", "the interior of a futuristic space station with a window onto Earth"],
+      ["underwater", "海底世界", "Underwater", "an underwater scene with coral reefs, light rays and drifting fish"]
+    ]
+  },
+  {
+    key: "festive", zh: "节日与活动", en: "Festive & events",
+    children: [
+      ["spring-festival", "春节", "Chinese New Year", "a Chinese New Year street decorated with red lanterns, couplets and paper cuts"],
+      ["christmas", "圣诞", "Christmas", "a cosy room with a decorated Christmas tree, fairy lights and wrapped gifts"],
+      ["wedding", "婚礼现场", "Wedding venue", "an elegant wedding venue with a floral arch, an aisle and soft daylight"],
+      ["party", "派对", "Party", "a festive party room with balloons, string lights and a decorated table"],
+      ["stage", "舞台", "Stage", "a theatre stage with spotlights, curtains and light haze"]
+    ]
+  }
+];
+
+// Items are accessories and props the subject wears or holds. Inserted by
+// migration 3. Hints name the item; the generator renders it as a product shot.
+export const ITEM_TREE = [
+  {
+    key: "jewelry", zh: "首饰", en: "Jewellery",
+    children: [
+      ["necklace", "项链", "Necklace", "a necklace or pendant"],
+      ["earrings", "耳饰", "Earrings", "a pair of earrings"],
+      ["bracelet", "手镯手链", "Bracelet", "a bracelet or bangle"],
+      ["ring", "戒指", "Ring", "a ring"],
+      ["hair-accessory", "发饰", "Hair accessory", "a hair accessory such as a hairpin, clip, headband or hair comb"],
+      ["brooch", "胸针", "Brooch", "a brooch"]
+    ]
+  },
+  {
+    key: "bags", zh: "包袋", en: "Bags",
+    children: [
+      ["handbag", "手提包", "Handbag", "a structured handbag with a top handle"],
+      ["shoulder-bag", "单肩斜挎包", "Shoulder bag", "a shoulder or crossbody bag with a strap"],
+      ["backpack", "双肩包", "Backpack", "a backpack"],
+      ["clutch", "手拿包", "Clutch", "a small evening clutch"],
+      ["tote", "托特包", "Tote", "a tote bag"]
+    ]
+  },
+  {
+    key: "headwear", zh: "帽子与头饰", en: "Headwear",
+    children: [
+      ["cap", "棒球帽", "Cap", "a baseball cap"],
+      ["beret", "贝雷帽", "Beret", "a beret"],
+      ["sun-hat", "遮阳草帽", "Sun hat", "a wide-brim straw sun hat"],
+      ["fedora", "礼帽", "Fedora", "a fedora or felt hat"],
+      ["beanie", "针织帽", "Beanie", "a knitted beanie"],
+      ["headdress", "古风发冠", "Traditional headdress", "a traditional Chinese hair crown or headdress with hairpins"]
+    ]
+  },
+  {
+    key: "eyewear", zh: "眼镜", en: "Eyewear",
+    children: [
+      ["sunglasses", "墨镜", "Sunglasses", "a pair of sunglasses"],
+      ["glasses", "眼镜", "Glasses", "a pair of optical glasses"]
+    ]
+  },
+  {
+    key: "accessories", zh: "围巾与配件", en: "Scarves & accessories",
+    children: [
+      ["scarf", "围巾", "Scarf", "a scarf"],
+      ["silk-scarf", "丝巾", "Silk scarf", "a printed silk scarf"],
+      ["gloves", "手套", "Gloves", "a pair of gloves"],
+      ["belt", "腰带", "Belt", "a belt"],
+      ["watch", "手表", "Watch", "a wristwatch"]
+    ]
+  },
+  {
+    key: "shoes", zh: "鞋靴", en: "Shoes",
+    children: [
+      ["heels", "高跟鞋", "Heels", "a pair of high heels"],
+      ["sneakers", "运动鞋", "Sneakers", "a pair of sneakers"],
+      ["boots", "靴子", "Boots", "a pair of boots"],
+      ["flats", "平底鞋", "Flats", "a pair of flat shoes or loafers"]
+    ]
+  },
+  {
+    key: "props", zh: "手持道具", en: "Handheld props",
+    children: [
+      ["umbrella", "雨伞", "Umbrella", "an umbrella or parasol"],
+      ["fan", "扇子", "Fan", "a hand fan, such as a folding fan or a round silk fan"],
+      ["bouquet", "花束", "Bouquet", "a bouquet of flowers"],
+      ["book", "书本", "Book", "a book"],
+      ["drink", "饮品杯", "Drink", "a cup of coffee, tea or another drink"],
+      ["camera", "相机", "Camera", "a camera"],
+      ["instrument", "乐器", "Instrument", "a musical instrument such as a violin, guitar or flute"],
+      ["lantern", "灯笼", "Lantern", "a traditional lantern"]
+    ]
+  },
+  {
+    key: "costume-props", zh: "角色道具", en: "Costume props",
+    children: [
+      ["sword", "剑", "Sword", "a prop sword in its scabbard, such as a Chinese jian or a fantasy sword"],
+      ["staff", "法杖", "Staff", "a fantasy staff or wand"],
+      ["bow", "弓", "Bow", "a prop bow"],
+      ["shield", "盾牌", "Shield", "a prop shield"],
+      ["mask", "面具", "Mask", "a decorative mask"]
+    ]
+  }
+];
+
 // Where the imported outfit categories sit in the tree.
 export const UPSTREAM_OUTFIT_SERIES = {
   spring: "daily", summer: "daily", autumn: "daily", winter: "daily",
   party: "formal", lingerie: "intimate", swimwear: "swim", sexy: "style"
 };
 
-export function seedCategories(db, now = Date.now()) {
+const TREES = { pose: POSE_TREE, outfit: OUTFIT_TREE, scene: SCENE_TREE, item: ITEM_TREE };
+
+export function seedCategories(db, types, now = Date.now()) {
   const insert = db.prepare(`INSERT INTO asset_categories (type, parent_id, key, name_zh, name_en, hint, rating,
     gen_enabled, sort, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-  for (const [type, tree] of [["pose", POSE_TREE], ["outfit", OUTFIT_TREE]]) {
-    tree.forEach((major, i) => {
+  for (const type of types) {
+    TREES[type].forEach((major, i) => {
       const parent = insert.run(type, null, major.key, major.zh, major.en, "", "general", 1, (i + 1) * 10, now, now)
         .lastInsertRowid;
       major.children.forEach(([key, zh, en, hint, rating = "general"], j) => {

@@ -1,12 +1,13 @@
 import { h, icon, replace } from "../core/dom.js";
 import { api } from "../core/api.js";
-import { store } from "../core/store.js";
+import { store, draft } from "../core/store.js";
 import { label, number } from "../core/format.js";
-import { toastError, emptyState } from "../core/ui.js";
+import { toast, toastError, emptyState } from "../core/ui.js";
 import { selectMenu } from "../core/select.js";
+import { navigate } from "../core/nav.js";
 
-// Browse poses or outfits with filters and paging. Used full-page in the
-// library and inside the studio's picker dialog.
+// Browse poses, outfits, scenes or items with filters and paging. Used
+// full-page in the library and inside the studio's picker dialogs.
 //   mode "page":   card click -> onOpen(item, group)
 //   mode "picker": card click -> onSelect(asset) (poses first ask for an angle)
 
@@ -26,7 +27,26 @@ export function usableNote(asset, withPerson) {
 // Credits the signed-in user pays to use someone else's shared asset.
 export const assetFee = (asset) => (asset?.price && asset.owner?.id !== store.user?.id ? asset.price : 0);
 
+// Put a library asset on the studio. Items join the list; past the limit the
+// oldest one makes room.
+export function useInStudio(asset) {
+  if (asset.type === "pose") draft.patch({ pose: asset });
+  else if (asset.type === "outfit") draft.patch({ outfit: asset, outfitUpload: null });
+  else if (asset.type === "scene") draft.patch({ sceneAsset: asset, scene: "" });
+  else {
+    const items = (draft.read().items || []).filter((a) => a.id !== asset.id);
+    const max = store.config.generation.maxItems || 3;
+    if (items.length >= max) toast(`物品最多 ${max} 件，已替换最早选的那件`);
+    draft.patch({ items: [...items.slice(-(max - 1)), asset] });
+  }
+  navigate("/studio");
+}
+
 const EMPTY = { series: "", category: "", angle: "", q: "", origin: "", license: "", view: "group" };
+export const TYPE_TEXT = { pose: "姿势", outfit: "服装", scene: "场景", item: "物品" };
+const PATHS = { pose: "/api/library/poses", outfit: "/api/library/outfits", scene: "/api/library/scenes", item: "/api/library/items" };
+const UNITS = { outfit: "套服装", scene: "个场景", item: "件物品" };
+const SEARCH_HINT = { pose: "搜索姿势名称、编号", outfit: "搜索颜色、单品、编号", scene: "搜索地点、氛围", item: "搜索名称、材质、颜色" };
 
 export function libraryBrowser({ type = "pose", mode = "page", withPerson = false, filters: initial = {}, onSelect, onOpen, onFiltersChange }) {
   const state = {
@@ -39,7 +59,7 @@ export function libraryBrowser({ type = "pose", mode = "page", withPerson = fals
 
   const filterBar = h("div.lib-filters");
   const summary = h("p.lib-summary.small.muted", { "aria-live": "polite" });
-  const grid = h("div.lib-grid", { class: state.type === "outfit" ? "is-outfit" : "is-pose" });
+  const grid = h("div.lib-grid", { class: `is-${state.type}` });
   const more = h("button.btn.lib-more", { type: "button", hidden: true, onclick: () => load(false) }, "加载更多");
   const sheet = h("div.angle-sheet", { hidden: true });
   const node = h("div.lib-browser", { class: `mode-${mode}` }, filterBar, sheet, summary, grid, h("div.lib-more-wrap", more));
@@ -88,13 +108,13 @@ export function libraryBrowser({ type = "pose", mode = "page", withPerson = fals
     const search = h("label.lib-search",
       icon("search", 17),
       h("span.sr-only", "搜索"),
-      h("input.input", { type: "search", value: f.q, placeholder: state.type === "pose" ? "搜索姿势名称、编号" : "搜索颜色、单品、编号",
+      h("input.input", { type: "search", value: f.q, placeholder: SEARCH_HINT[state.type],
         oninput: (e) => {
           clearTimeout(searchTimer);
           const q = e.target.value;
           searchTimer = setTimeout(() => setFilter({ q }, { reload: true }), 280);
         } }));
-    const m = state.type === "pose" ? meta.pose : meta.outfit;
+    const m = meta[state.type];
     const cats = m.categories.filter((c) => !f.series || c.series === f.series);
     const categoryOptions = cats.map((c) => ({ value: c.key, text: label(c), note: number(c.count) }));
     if (state.type === "pose") {
@@ -111,12 +131,12 @@ export function libraryBrowser({ type = "pose", mode = "page", withPerson = fals
           mode === "page" ? select("view", f.view === "image" ? "image" : "", [{ value: "image", text: "逐张显示" }], "按姿势分组",
             (view) => setFilter({ view: view || "group" })) : null));
     } else {
-      // Outfits: 大类 as chips, 小类 in a menu grouped by 大类.
+      // Outfits, scenes and items: 大类 as chips, 小类 in a menu grouped by 大类.
       const grouped = f.series ? categoryOptions : m.series.flatMap((s) => [
         { group: label(s) }, ...m.categories.filter((c) => c.series === s.key).map((c) => ({ value: c.key, text: label(c), note: number(c.count) }))
       ]);
       replace(filterBar,
-        seriesChips(m.series, "服装大类", (s) => s.count),
+        seriesChips(m.series, `${TYPE_TEXT[state.type]}大类`, (s) => s.count),
         h("div.lib-filter-row",
           search,
           select("category", f.category, grouped, f.series ? "全部小类" : "全部分类", (category) => {
@@ -142,7 +162,8 @@ export function libraryBrowser({ type = "pose", mode = "page", withPerson = fals
     const asset = isGroup ? item.cover : item;
     const note = mode === "picker" ? usableNote(asset, withPerson) : "";
     const angles = isGroup ? item.images.length : 0;
-    const name = state.type === "pose" || asset.generated ? label(asset.name) : asset.id;
+    // Imported outfits have no names, only codes.
+    const name = state.type !== "outfit" || asset.generated ? label(asset.name) || asset.id : asset.id;
     const tags = state.type === "pose"
       ? [label(asset.category), angles > 1 ? `${angles} 个角度` : label(asset.angle)]
       : [label(asset.category)];
@@ -190,7 +211,7 @@ export function libraryBrowser({ type = "pose", mode = "page", withPerson = fals
     sheet.hidden = true;
     try {
       const f = state.filters;
-      const path = state.type === "pose" ? "/api/library/poses" : "/api/library/outfits";
+      const path = PATHS[state.type];
       const common = { series: f.series, category: f.category, q: f.q, origin: f.origin, license: f.license, page: state.page, size: PAGE };
       const query = state.type === "pose"
         ? { ...common, angle: f.angle, view: mode === "picker" ? "group" : f.view }
@@ -201,11 +222,17 @@ export function libraryBrowser({ type = "pose", mode = "page", withPerson = fals
       state.items.push(...data.items);
       if (reset) grid.replaceChildren();
       grid.append(...data.items.map(card));
-      if (!state.items.length) {
+      const filtered = Object.entries(f).some(([k, v]) => k !== "view" && v);
+      if (!state.items.length && filtered) {
         grid.replaceChildren(emptyState({ title: "没有找到匹配的素材", text: "换个关键词，或清除筛选条件试试。",
           action: h("button.btn", { type: "button", onclick: () => setFilter({ ...EMPTY, view: state.filters.view }) }, "清除筛选") }));
+      } else if (!state.items.length) {
+        const canGenerate = store.config.assets.generation;
+        grid.replaceChildren(emptyState({ icon: "wand", color: "purple", title: `还没有${TYPE_TEXT[state.type]}素材`,
+          text: canGenerate ? `可以在「我的素材」里按分类生成${TYPE_TEXT[state.type]}，生成后自己可以直接使用。` : "管理员添加后会出现在这里。",
+          action: canGenerate && mode === "page" ? h("a.btn.btn-primary", { href: store.user ? `/my-assets?generate=${state.type}` : "/login" }, "生成素材") : null }));
       }
-      const unit = state.type === "pose" && (mode === "picker" || f.view !== "image") ? "组姿势" : state.type === "pose" ? "张姿势图" : "套服装";
+      const unit = state.type === "pose" && (mode === "picker" || f.view !== "image") ? "组姿势" : state.type === "pose" ? "张姿势图" : UNITS[state.type];
       summary.textContent = `共 ${number(state.total)} ${unit}`;
       more.hidden = state.items.length >= state.total;
     } catch (err) {
@@ -227,7 +254,7 @@ export function libraryBrowser({ type = "pose", mode = "page", withPerson = fals
     setType(next, filters = {}) {
       state.type = next;
       state.filters = { ...EMPTY, ...filters };
-      grid.className = `lib-grid ${next === "outfit" ? "is-outfit" : "is-pose"}`;
+      grid.className = `lib-grid is-${next}`;
       renderFilters();
       load(true);
     }

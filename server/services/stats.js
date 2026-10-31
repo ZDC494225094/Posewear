@@ -4,6 +4,7 @@ import * as settings from "./settings.js";
 import * as channels from "./channels.js";
 import { DAY, localDate, startOfLocalDay, sqlLocalDate } from "../lib/time.js";
 import { counts as libraryCounts } from "./library.js";
+import { pendingVirtualCount } from "./uploads.js";
 
 function series(days, rows, fields) {
   const map = new Map(rows.map((r) => [r.day, r]));
@@ -61,6 +62,7 @@ export function overview({ days = 30 } = {}) {
     WHERE is_public = 1 AND approved = 0 AND hidden = 0 AND deleted_at IS NULL`).get().n : 0;
   const pendingAssets = db.prepare(`SELECT COUNT(*) AS n FROM assets
     WHERE review = 'pending' AND visibility = 'public' AND enabled = 1`).get().n;
+  const pendingVirtual = pendingVirtualCount();
 
   const rev = series(span, revDaily, ["revenue"]);
   const signups = series(span, userDaily, ["signups"]);
@@ -89,6 +91,7 @@ export function overview({ days = 30 } = {}) {
     pendingReports,
     pendingReview,
     pendingAssets,
+    pendingVirtual,
     library: libraryCounts(),
     warnings: warnings()
   };

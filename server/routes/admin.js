@@ -5,6 +5,7 @@ import * as channels from "../services/channels.js";
 import * as library from "../services/library.js";
 import * as taxonomy from "../services/taxonomy.js";
 import * as assetJobs from "../services/asset-jobs.js";
+import * as uploads from "../services/uploads.js";
 import * as generations from "../services/generations.js";
 import * as billing from "../services/billing.js";
 import * as credits from "../services/credits.js";
@@ -334,6 +335,27 @@ router.delete("/admin/assets/:id", (req, res) => {
   res.json({ ok: true });
 });
 
+// Generation details of one asset: the job that made it and what it used.
+router.get("/admin/assets/:id/info", (req, res) => {
+  res.json(assetJobs.assetInfo(req.params.id, { admin: true }));
+});
+
+// ---------- virtual persons
+
+router.get("/admin/virtual-persons", (req, res) => {
+  const { offset, size } = v.page(req.query, { defaultSize: 24, maxSize: 60 });
+  const status = ["pending", "approved", "rejected"].includes(req.query.status) ? req.query.status : "";
+  res.json(uploads.listVirtual({ status, offset, size }));
+});
+
+router.post("/admin/virtual-persons/:id", (req, res) => {
+  const approve = req.body?.action === "approve";
+  if (!approve && req.body?.action !== "reject") throw badRequest("INVALID_INPUT", "处理方式不正确");
+  const upload = uploads.reviewVirtual(req.params.id, { approve, note: req.body?.note });
+  audit(req, approve ? "virtual.approve" : "virtual.reject", "upload", req.params.id, { note: req.body?.note });
+  res.json({ upload });
+});
+
 // ---------- asset generation
 
 router.post("/admin/asset-jobs", (req, res) => {
@@ -351,7 +373,8 @@ router.get("/admin/asset-jobs", (req, res) => {
   res.json(assetJobs.listJobs({
     admin: true, offset, size,
     status: ["active", "succeeded", "failed"].includes(req.query.status) ? req.query.status : "",
-    scope: ["platform", "user"].includes(req.query.scope) ? req.query.scope : ""
+    scope: ["platform", "user"].includes(req.query.scope) ? req.query.scope : "",
+    type: library.ASSET_TYPES.includes(req.query.type) ? req.query.type : ""
   }));
 });
 
@@ -365,7 +388,7 @@ function categoryTree(type) {
 }
 
 router.get("/admin/asset-categories", (req, res) => {
-  res.json({ pose: categoryTree("pose"), outfit: categoryTree("outfit") });
+  res.json(Object.fromEntries(library.ASSET_TYPES.map((type) => [type, categoryTree(type)])));
 });
 
 router.post("/admin/asset-categories", (req, res) => {

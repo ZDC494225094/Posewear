@@ -13,7 +13,8 @@ const viewerOf = (req) => ({ loggedIn: !!req.user, userId: req.user?.id ?? null 
 router.get("/public/config", (req, res) => {
   const cfg = settings.publicConfig();
   const meta = library.meta(viewerOf(req));
-  res.json({ ...cfg, library: { ...cfg.library, poses: meta.pose.total, poseGroups: meta.pose.groups, outfits: meta.outfit.total } });
+  res.json({ ...cfg, library: { ...cfg.library, poses: meta.pose.total, poseGroups: meta.pose.groups, outfits: meta.outfit.total,
+    scenes: meta.scene.total, items: meta.item.total } });
 });
 
 const LEGAL = {
@@ -34,19 +35,13 @@ router.get("/public/showcase", (req, res) => {
   res.json(generations.showcase({ offset, size }));
 });
 
-// Home page data: featured works, plus random pose/outfit pairs for the hero.
+// Home page data: real pose + outfit = result examples for the hero, featured
+// and recent works, and packages.
 router.get("/public/home", (req, res) => {
-  const viewer = viewerOf(req);
-  const pairs = [];
-  for (let i = 0; i < 4; i++) {
-    const pose = library.random({ type: "pose", forAI: true, withPerson: true }, viewer);
-    const outfit = library.random({ type: "outfit", forAI: true, withPerson: true }, viewer);
-    if (pose && outfit) pairs.push({ pose, outfit });
-  }
   res.json({
+    combos: generations.homeCombos(viewerOf(req), 6),
     featured: generations.featuredForHome(8),
     recent: generations.showcase({ offset: 0, size: 8 }).items,
-    pairs,
     packages: billing.listPackages().slice(0, 3)
   });
 });

@@ -11,6 +11,12 @@ import { randomId } from "../lib/crypto.js";
 export const RATINGS = ["general", "suggestive", "explicit"];
 export const RATING_LABELS = { general: "普通", suggestive: "敏感", explicit: "限制" };
 export const LICENSES = ["commercial", "noncommercial"];
+export const ASSET_TYPES = taxonomy.ASSET_TYPES;
+// Every type except poses is a flat list; poses group their camera angles.
+export const FLAT_TYPES = ASSET_TYPES.filter((t) => t !== "pose");
+export const TYPE_LABELS = { pose: "姿势", outfit: "服装", scene: "场景", item: "物品" };
+// Asset ids start with c (uploaded) or g (generated) plus this letter.
+export const ID_PREFIX = { pose: "p", outfit: "o", scene: "s", item: "i" };
 // Camera angles used by the pose catalog, in display order.
 export const ANGLES = [
   { key: "正面", zh: "正面", en: "Front" },
@@ -49,6 +55,7 @@ function buildIndex() {
   const rows = db.prepare(`SELECT a.*, u.nickname AS owner_name, u.status AS owner_status
     FROM assets a LEFT JOIN users u ON u.id = a.owner_id ORDER BY a.type, a.sort, a.created_at DESC, a.id`).all();
   const byId = new Map();
+  const byType = Object.fromEntries(ASSET_TYPES.map((t) => [t, []]));
   const groups = new Map();
   for (const row of rows) {
     const labels = treeLabels(row);
@@ -58,17 +65,13 @@ function buildIndex() {
       labels.category.en, row.category_ja, row.name, row.name_zh, row.name_en, row.angle, row.angle_zh,
       row.angle_en, row.keywords, row.owner_name].join(" ").toLowerCase();
     byId.set(row.id, row);
+    byType[row.type]?.push(row);
     if (row.type === "pose") {
       if (!groups.has(row.group_key)) groups.set(row.group_key, []);
       groups.get(row.group_key).push(row);
     }
   }
-  return {
-    poses: rows.filter((r) => r.type === "pose"),
-    outfits: rows.filter((r) => r.type === "outfit"),
-    byId,
-    groups
-  };
+  return { byType, byId, groups };
 }
 
 function idx() {
@@ -81,9 +84,13 @@ export function invalidate() {
 }
 
 export function counts() {
-  const { poses, outfits, groups } = idx();
-  return { poses: poses.length, poseGroups: groups.size, outfits: outfits.length };
+  const { byType, groups } = idx();
+  return { poses: byType.pose.length, poseGroups: groups.size, outfits: byType.outfit.length,
+    scenes: byType.scene.length, items: byType.item.length };
 }
+
+// Rows of one type, or of every type.
+const pool = (type) => (ASSET_TYPES.includes(type) ? idx().byType[type] : ASSET_TYPES.flatMap((t) => idx().byType[t]));
 
 // ---------- visibility rules
 
@@ -144,7 +151,7 @@ export function ownerDto(row) {
   return {
     ...dto(row),
     visibility: row.visibility, review: row.review, reviewNote: row.review_note,
-    earned: row.earned, useCount: row.use_count, enabled: !!row.enabled,
+    earned: row.earned, useCount: row.use_count, enabled: !!row.enabled, jobId: row.job_id,
     createdAt: row.created_at, publishedAt: row.published_at,
     groupAngles: row.type === "pose" ? groupAngles(row.group_key) : undefined
   };
@@ -182,7 +189,8 @@ function matches(row, f, viewer = {}) {
 export function queryPoses(filters, viewer, { offset = 0, limit = 48 } = {}) {
   const q = String(filters.q || "").trim().toLowerCase();
   const f = { ...filters, q };
-  const { poses, groups } = idx();
+  const poses = idx().byType.pose;
+  const groups = idx().groups;
   if (filters.view === "image") {
     const items = poses.filter((r) => visible(r, viewer) && matches(r, f, viewer));
     return { total: items.length, items: items.slice(offset, offset + limit).map(dto) };
@@ -203,10 +211,11 @@ export function queryPoses(filters, viewer, { offset = 0, limit = 48 } = {}) {
   return { total: keys.length, items };
 }
 
-export function queryOutfits(filters, viewer, { offset = 0, limit = 48 } = {}) {
+// Outfits, scenes and items: one card per asset.
+export function queryFlat(type, filters, viewer, { offset = 0, limit = 48 } = {}) {
   const q = String(filters.q || "").trim().toLowerCase();
   const f = { series: filters.series, category: filters.category, origin: filters.origin, license: filters.license, q };
-  const items = idx().outfits.filter((r) => visible(r, viewer) && matches(r, f, viewer));
+  const items = idx().byType[type].filter((r) => visible(r, viewer) && matches(r, f, viewer));
   return { total: items.length, items: items.slice(offset, offset + limit).map(dto) };
 }
 
@@ -220,11 +229,36 @@ function byTree(list, type, keyOf) {
 const seriesRank = (s, order) => [order.majors.get(s.key) ?? Infinity, 0];
 const categoryRank = (c, order) => [order.majors.get(c.series) ?? Infinity, order.minors.get(`${c.series}\u0000${c.key}`) ?? Infinity];
 
+// Facets of one flat type: 大类 and 小类 with counts, and origin counts.
+function flatMeta(type, viewer) {
+  const seriesMap = new Map(), cats = new Map();
+  const origins = { platform: 0, user: 0, mine: 0, commercial: 0 };
+  for (const row of idx().byType[type]) {
+    if (!visible(row, viewer)) continue;
+    const s = seriesMap.get(row.series) || { ...row._series, count: 0 };
+    s.count += 1;
+    seriesMap.set(row.series, s);
+    const ck = `${row.series}\u0000${row.category}`;
+    const c = cats.get(ck) || { ...row._category, series: row.series, count: 0 };
+    c.count += 1;
+    cats.set(ck, c);
+    if (row.owner_id) origins.user += 1; else origins.platform += 1;
+    if (row.owner_id && row.owner_id === viewer.userId) origins.mine += 1;
+    if (row.license === "commercial") origins.commercial += 1;
+  }
+  return {
+    series: byTree([...seriesMap.values()], type, seriesRank),
+    categories: byTree([...cats.values()], type, categoryRank),
+    total: [...cats.values()].reduce((n, c) => n + c.count, 0),
+    origins
+  };
+}
+
 export function meta(viewer = {}) {
-  const { poses, outfits, groups } = idx();
+  const poses = idx().byType.pose;
+  const groups = idx().groups;
   const seriesMap = new Map(), categoryMap = new Map(), angleMap = new Map();
-  const origins = { pose: { platform: new Set(), user: new Set(), mine: new Set(), commercial: new Set() },
-    outfit: { platform: 0, user: 0, mine: 0, commercial: 0 } };
+  const origins = { platform: new Set(), user: new Set(), mine: new Set(), commercial: new Set() };
   for (const row of poses) {
     if (!visible(row, viewer)) continue;
     const s = seriesMap.get(row.series) || { ...row._series, groups: new Set(), images: 0 };
@@ -235,25 +269,9 @@ export function meta(viewer = {}) {
     c.groups.add(row.group_key);
     categoryMap.set(ck, c);
     if (!angleMap.has(row.angle)) angleMap.set(row.angle, columnLabel(row, "angle"));
-    const o = origins.pose;
-    (row.owner_id ? o.user : o.platform).add(row.group_key);
-    if (row.owner_id && row.owner_id === viewer.userId) o.mine.add(row.group_key);
-    if (row.license === "commercial") o.commercial.add(row.group_key);
-  }
-  const outfitSeries = new Map(), outfitCats = new Map();
-  for (const row of outfits) {
-    if (!visible(row, viewer)) continue;
-    const s = outfitSeries.get(row.series) || { ...row._series, count: 0 };
-    s.count += 1;
-    outfitSeries.set(row.series, s);
-    const ck = `${row.series}\u0000${row.category}`;
-    const c = outfitCats.get(ck) || { ...row._category, series: row.series, count: 0 };
-    c.count += 1;
-    outfitCats.set(ck, c);
-    const o = origins.outfit;
-    if (row.owner_id) o.user += 1; else o.platform += 1;
-    if (row.owner_id && row.owner_id === viewer.userId) o.mine += 1;
-    if (row.license === "commercial") o.commercial += 1;
+    (row.owner_id ? origins.user : origins.platform).add(row.group_key);
+    if (row.owner_id && row.owner_id === viewer.userId) origins.mine.add(row.group_key);
+    if (row.license === "commercial") origins.commercial.add(row.group_key);
   }
   const finalize = (item) => {
     const { groups: g, ...rest } = item;
@@ -271,14 +289,9 @@ export function meta(viewer = {}) {
       angles: [...angleMap.values()].sort((a, b) => angleRank(a) - angleRank(b)),
       total: [...seriesMap.values()].reduce((n, s) => n + s.images, 0),
       groups: new Set(poses.filter((r) => visible(r, viewer)).map((r) => r.group_key)).size,
-      origins: sizes(origins.pose)
+      origins: sizes(origins)
     },
-    outfit: {
-      series: byTree([...outfitSeries.values()], "outfit", seriesRank),
-      categories: byTree([...outfitCats.values()], "outfit", categoryRank),
-      total: [...outfitCats.values()].reduce((n, c) => n + c.count, 0),
-      origins: origins.outfit
-    },
+    ...Object.fromEntries(FLAT_TYPES.map((type) => [type, flatMeta(type, viewer)])),
     totalGroups: groups.size
   };
 }
@@ -290,10 +303,10 @@ export function random({ type, series, category, includeDuo = false, forAI = fal
   exclude = "" }, viewer = {}) {
   const ok = (r) => visible(r, viewer) && (!forAI || usableForAI(r, { withPerson })) &&
     (!r.owner_id || r.owner_id === viewer.userId);
-  if (type === "outfit") {
-    const pool = idx().outfits.filter((r) => ok(r) && (!series || r.series === series) && (!category || r.category === category));
-    const alternatives = pool.filter((r) => r.id !== exclude);
-    const from = alternatives.length ? alternatives : pool;
+  if (FLAT_TYPES.includes(type)) {
+    const candidates = idx().byType[type].filter((r) => ok(r) && (!series || r.series === series) && (!category || r.category === category));
+    const alternatives = candidates.filter((r) => r.id !== exclude);
+    const from = alternatives.length ? alternatives : candidates;
     return from.length ? dto(from[Math.floor(Math.random() * from.length)]) : null;
   }
   const candidates = [];
@@ -326,10 +339,11 @@ export function assetFile(asset, variant) {
   return full;
 }
 
-// Source used as model input: outfit previews are already large enough and
-// much smaller than the PNG originals.
+// Source used as model input: previews of photos (outfits, scenes, items) are
+// already large enough and much smaller than the PNG originals. Poses are line
+// art and go as the original.
 export function aiSourceFile(asset) {
-  return asset.type === "outfit" && asset.preview_path ? assetFile(asset, "preview") : assetFile(asset, "original");
+  return asset.type !== "pose" && asset.preview_path ? assetFile(asset, "preview") : assetFile(asset, "original");
 }
 
 export function bumpUse(ids) {
@@ -376,7 +390,7 @@ function minorCategory(type, categoryId) {
 
 // Assets filed under a category, for the delete check.
 export function categoryUsage(cat) {
-  const rows = cat.type === "pose" ? idx().poses : idx().outfits;
+  const rows = idx().byType[cat.type] || [];
   if (!cat.parent_id) return rows.filter((r) => r.series === cat.key).length;
   const parent = taxonomy.get(cat.parent_id);
   return rows.filter((r) => r.series === parent?.key && r.category === cat.key).length;
@@ -395,8 +409,7 @@ export function adminDto(row) {
 
 export function adminList(f, { offset, size }) {
   const term = String(f.q || "").trim().toLowerCase();
-  const pool = f.type === "outfit" ? idx().outfits : f.type === "pose" ? idx().poses : [...idx().poses, ...idx().outfits];
-  const rows = pool.filter((r) => (!f.rating || r.rating === f.rating) &&
+  const rows = pool(f.type).filter((r) => (!f.rating || r.rating === f.rating) &&
       (f.enabled === undefined || f.enabled === "" || r.enabled === Number(f.enabled)) &&
       (!f.series || r.series === f.series) && (!f.category || r.category === f.category) &&
       (!f.source || r.source === f.source) &&
@@ -417,9 +430,9 @@ export function adminList(f, { offset, size }) {
 }
 
 export function adminFacets() {
-  const facets = { pose: { series: new Map(), categories: new Map() }, outfit: { series: new Map(), categories: new Map() } };
-  const counts = { pose: { user: 0, pending: 0, commercial: 0 }, outfit: { user: 0, pending: 0, commercial: 0 } };
-  for (const r of [...idx().poses, ...idx().outfits]) {
+  const facets = Object.fromEntries(ASSET_TYPES.map((t) => [t, { series: new Map(), categories: new Map() }]));
+  const counts = Object.fromEntries(ASSET_TYPES.map((t) => [t, { user: 0, pending: 0, commercial: 0 }]));
+  for (const r of pool()) {
     const f = facets[r.type];
     if (r.series) f.series.set(r.series, { key: r.series, zh: r._series.zh });
     f.categories.set(`${r.series}\u0000${r.category}`, { key: r.category, zh: r._category.zh, series: r.series });
@@ -430,7 +443,7 @@ export function adminFacets() {
   }
   const ratingCounts = db.prepare("SELECT type, rating, enabled, COUNT(*) AS n FROM assets GROUP BY type, rating, enabled").all();
   const out = {};
-  for (const type of ["pose", "outfit"]) {
+  for (const type of ASSET_TYPES) {
     out[type] = {
       series: byTree([...facets[type].series.values()], type, seriesRank),
       categories: byTree([...facets[type].categories.values()], type, categoryRank),
@@ -489,8 +502,8 @@ export const bulkUpdate = tx(({ ids, filter }, patch) => {
   if (!keys.length) throw badRequest("INVALID_INPUT", "没有要修改的字段");
   let targets = [];
   if (Array.isArray(ids) && ids.length) targets = ids.map(String).slice(0, 5000);
-  else if (filter && (filter.type === "pose" || filter.type === "outfit")) {
-    targets = (filter.type === "pose" ? idx().poses : idx().outfits)
+  else if (filter && ASSET_TYPES.includes(filter.type)) {
+    targets = idx().byType[filter.type]
       .filter((r) => (!filter.series || r.series === filter.series) && (!filter.category || r.category === filter.category) &&
         (!filter.source || r.source === filter.source) &&
         (!filter.origin || (filter.origin === "user" ? !!r.owner_id : !r.owner_id)))
@@ -508,7 +521,7 @@ export const bulkUpdate = tx(({ ids, filter }, patch) => {
 // thumbnail and preview, so it behaves exactly like an imported one.
 export async function createCustomAsset({ type, categoryId, category, categoryZh, categoryEn, nameZh, nameEn, keywords,
   rating, license = "commercial", series, seriesZh, seriesEn, people }, file) {
-  if (!["pose", "outfit"].includes(type)) throw badRequest("INVALID_INPUT", "素材类型不正确");
+  if (!ASSET_TYPES.includes(type)) throw badRequest("INVALID_INPUT", "素材类型不正确");
   if (!RATINGS.includes(rating)) throw badRequest("INVALID_INPUT", "分级取值不正确");
   if (!LICENSES.includes(license)) throw badRequest("INVALID_INPUT", "授权取值不正确");
   const minor = categoryId ? minorCategory(type, Number(categoryId)) : null;
@@ -518,7 +531,7 @@ export async function createCustomAsset({ type, categoryId, category, categoryZh
   if (!info || !["jpeg", "png", "webp"].includes(info.format)) {
     throw badRequest("INVALID_IMAGE", "仅支持 PNG、JPG、WebP 图片");
   }
-  const id = `${type === "pose" ? "cp" : "co"}_${randomId(10)}`;
+  const id = `c${ID_PREFIX[type]}_${randomId(10)}`;
   const dir = path.join(customRoot, type, id);
   fs.mkdirSync(dir, { recursive: true });
   const base = sharp(file.buffer, { limitInputPixels: 60_000_000 }).rotate();
@@ -526,7 +539,8 @@ export async function createCustomAsset({ type, categoryId, category, categoryZh
     .toFile(path.join(dir, "original.png"));
   await base.clone().resize({ width: 1600, height: 1600, fit: "inside", withoutEnlargement: true })
     .webp({ quality: 88 }).toFile(path.join(dir, "preview.webp"));
-  await base.clone().resize({ width: 480, height: 640, fit: "inside", withoutEnlargement: true })
+  const [tw, th] = type === "scene" ? [640, 480] : type === "item" ? [480, 480] : [480, 640];
+  await base.clone().resize({ width: tw, height: th, fit: "inside", withoutEnlargement: true })
     .webp({ quality: 80 }).toFile(path.join(dir, "thumb.webp"));
   const cat = String(category || "custom").trim().slice(0, 40) || "custom";
   const name = String(nameZh || "").slice(0, 80);
@@ -561,8 +575,7 @@ export function deleteCustomAsset(id) {
 // ---------- assets owned by users
 
 export function listOwned(userId, { type, offset, size }) {
-  const pool = type === "outfit" ? idx().outfits : type === "pose" ? idx().poses : [...idx().poses, ...idx().outfits];
-  const rows = pool.filter((r) => r.owner_id === userId).sort((a, b) => b.created_at - a.created_at || a.sort - b.sort);
+  const rows = pool(type).filter((r) => r.owner_id === userId).sort((a, b) => b.created_at - a.created_at || a.sort - b.sort);
   return { total: rows.length, items: rows.slice(offset, offset + size).map(ownerDto) };
 }
 

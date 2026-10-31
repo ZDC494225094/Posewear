@@ -2,45 +2,70 @@ import { h, tile, replace } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { relative, number, STATUS_TEXT } from "../core/format.js";
 
-// Recent asset-generation jobs with live status. Polls while any job is
-// queued or running and reports each job that finishes.
-//   const jobs = assetJobList({ endpoint: "/api/my/asset-jobs", onFinished });
-//   jobs.add(newJobs); jobs.load(); jobs.stop();
-export function assetJobList({ endpoint, admin = false, limit = 6, onFinished, onOpenAsset } = {}) {
-  const node = h("section.ajobs", { hidden: true, "aria-label": "生成任务" });
+// Asset-generation jobs: the records list on the 素材生成 pages, and a small
+// indicator of running jobs for the pages that start them.
+
+const TYPE_TEXT = { pose: "姿势", outfit: "服装", scene: "场景", item: "物品" };
+const active = (j) => j.status === "queued" || j.status === "running";
+
+export function jobTitle(job) {
+  return [TYPE_TEXT[job.type], job.category, job.type === "pose" && job.angle && !job.sourceAssetId ? job.angle.zh : null,
+    job.sourceAssetId ? `补全${job.angle?.zh || ""}角度` : null, `${job.n} 张`].filter(Boolean).join(" · ");
+}
+
+function jobCard(job, { admin, onOpenAsset }) {
+  const results = job.status === "succeeded" && job.assets.length
+    ? h("div.ajob-results", { class: `is-${job.type}` }, job.assets.map((a) => h("button", { type: "button", "aria-label": `查看 ${a.name.zh}`,
+      onclick: () => onOpenAsset?.(a) }, h("img", { src: a.thumb, alt: "", loading: "lazy" }))))
+    : h("div.ajob-state", job.status === "failed" ? tile("alert", "red", "lg")
+      : job.status === "succeeded" ? h("span.small.muted", "素材已删除") : h("div.spinner", { "aria-hidden": "true" }));
+  return h("article.ajob", { class: `is-${job.status}` },
+    results,
+    h("div.ajob-body",
+      h("p.ajob-title", h("span.gen-status", STATUS_TEXT[job.status]), jobTitle(job)),
+      job.description ? h("p.ajob-desc", { title: job.description }, job.description) : null,
+      job.status === "failed" ? h("p.ajob-error", job.errorMessage || "生成失败") : null,
+      h("p.ajob-meta",
+        relative(job.createdAt),
+        admin ? ` · ${job.platform ? "平台素材" : job.userEmail}` : "",
+        job.cost ? ` · ${number(job.cost)} 点` : "",
+        job.refunded ? ` · 已退回 ${number(job.refunded)} 点` : "",
+        job.reference ? " · 用了参考图" : "",
+        job.sourceName ? ` · 来自「${job.sourceName}」` : "")));
+}
+
+// A page of jobs with live status: newest first, "加载更多" for older ones.
+// Polls while any job is queued or running and reports each job that finishes.
+//   const list = assetJobList({ endpoint: "/api/my/asset-jobs", onFinished, onOpenAsset });
+//   list.load({ status, type }); list.add(newJobs); list.stop();
+export function assetJobList({ endpoint, admin = false, size = 20, onFinished, onOpenAsset, emptyText = "还没有生成记录" } = {}) {
   const jobs = new Map();
-  let timer = null;
-  let stopped = false;
-
-  const active = (j) => j.status === "queued" || j.status === "running";
-
-  function row(job) {
-    const what = [job.type === "pose" ? "姿势" : "服装", job.category, job.angle && !job.sourceAssetId ? job.angle.zh : null,
-      job.sourceAssetId ? `补全${job.angle?.zh || ""}角度` : null, `${job.n} 张`].filter(Boolean).join(" · ");
-    const visual = job.status === "succeeded" && job.assets.length
-      ? h("div.ajob-thumbs", job.assets.slice(0, 4).map((a) => h("button", { type: "button", "aria-label": `查看 ${a.name.zh}`,
-        onclick: () => onOpenAsset?.(a) }, h("img", { src: a.thumb, alt: "" }))))
-      : job.status === "failed" ? tile("alert", "red") : h("div.spinner", { "aria-hidden": "true" });
-    return h("article.ajob", { class: `is-${job.status}` },
-      visual,
-      h("div.ajob-body",
-        h("p.ajob-title", h("span.gen-status", STATUS_TEXT[job.status]), what),
-        job.description ? h("p.ajob-desc", job.description) : null,
-        job.status === "failed" ? h("p.ajob-error", job.errorMessage || "生成失败") : null,
-        h("p.ajob-meta",
-          relative(job.createdAt),
-          admin ? ` · ${job.platform ? "平台" : job.userEmail}` : "",
-          job.cost ? ` · ${number(job.cost)} 点` : "",
-          job.refunded ? ` · 已退回 ${number(job.refunded)} 点` : "",
-          job.reference ? " · 参考图" : "")));
-  }
+  const list = h("div.ajobs-list");
+  const more = h("button.btn", { type: "button", hidden: true, onclick: () => fetchPage(false) }, "加载更多");
+  const summary = h("p.small.muted.ajobs-summary");
+  let page = 1, total = 0, query = {}, timer = null, stopped = false, token = 0;
 
   function render() {
-    const list = [...jobs.values()].sort((a, b) => b.createdAt - a.createdAt).slice(0, limit);
-    node.hidden = !list.length;
-    replace(node, h("div.ajobs-head", h("h2", "生成任务"),
-      list.some(active) ? h("span.small.muted", "生成中，完成后自动出现在下方") : null),
-    h("div.ajobs-list", list.map(row)));
+    const rows = [...jobs.values()].sort((a, b) => b.createdAt - a.createdAt);
+    replace(list, rows.length ? rows.map((j) => jobCard(j, { admin, onOpenAsset })) : h("div.empty.small", h("div.empty-title", emptyText)));
+    summary.textContent = total ? `共 ${number(total)} 条${rows.some(active) ? "，生成中的任务完成后会自动刷新" : ""}` : "";
+    more.hidden = jobs.size >= total;
+  }
+
+  async function fetchPage(reset) {
+    const mine = ++token;
+    if (reset) page = 1; else page += 1;
+    more.disabled = true;
+    try {
+      const data = await api.get(endpoint, { ...query, page, size });
+      if (mine !== token) return;
+      if (reset) jobs.clear();
+      total = data.total;
+      for (const job of data.items) jobs.set(job.id, job);
+      render();
+      schedule();
+    } catch { /* keep what is shown */ }
+    more.disabled = false;
   }
 
   async function poll() {
@@ -63,16 +88,37 @@ export function assetJobList({ endpoint, admin = false, limit = 6, onFinished, o
   }
 
   return {
-    node,
-    add(list) { for (const job of list) jobs.set(job.id, job); render(); schedule(); },
-    async load() {
-      try {
-        const data = await api.get(endpoint, { size: limit });
-        for (const job of data.items) jobs.set(job.id, job);
-        render();
-        schedule();
-      } catch { /* the list is optional */ }
+    node: h("div.ajobs", summary, list, h("div.lib-more-wrap", more)),
+    load(filters = {}) { query = filters; fetchPage(true); },
+    add(items) {
+      for (const job of items) { if (!jobs.has(job.id)) total += 1; jobs.set(job.id, job); }
+      render();
+      schedule();
     },
+    stop() { stopped = true; clearTimeout(timer); }
+  };
+}
+
+// "N 个素材生成中 · 查看": shown while the user (or, for admins, anyone) has
+// jobs running. Calls onSettled when some of them finish.
+export function activeJobsChip({ endpoint, href, onSettled } = {}) {
+  const node = h("a.ajobs-chip", { href, hidden: true });
+  let timer = null, stopped = false, last = 0;
+  async function poll() {
+    timer = null;
+    try {
+      const { total } = await api.get(endpoint, { status: "active", size: 1 });
+      if (total < last) onSettled?.();
+      last = total;
+      node.hidden = !total;
+      replace(node, h("span.spinner", { "aria-hidden": "true" }), `${total} 个素材生成中`, h("span.ajobs-chip-link", "查看"));
+    } catch { /* optional */ }
+    if (!stopped && last) timer = setTimeout(poll, document.hidden ? 10000 : 4000);
+  }
+  poll();
+  return {
+    node,
+    refresh() { clearTimeout(timer); poll(); },
     stop() { stopped = true; clearTimeout(timer); }
   };
 }

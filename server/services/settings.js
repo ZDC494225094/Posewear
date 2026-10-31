@@ -88,6 +88,9 @@ export const DEFAULTS = {
     outfit: "Image {n} is the OUTFIT reference: dress the subject in exactly this outfit, keeping its silhouette, colours, fabrics, patterns and accessories. Ignore how the outfit is displayed in the reference.",
     person: "Image {n} is the PERSON reference: keep this person's facial features, skin tone and hairstyle recognisable. Do not copy their clothing, pose or background.",
     personSafety: "Depict the person as an adult, fully clothed in the outfit, in a natural and non-sexualised way.",
+    virtualPersonSafety: "Depict the person as an adult.",
+    sceneImage: "Image {n} is the SCENE reference: place the subject in this location, keeping its setting, architecture or landscape, lighting and mood. Frame the shot to suit the output size and leave out any people shown in it.",
+    item: "Image {n} is an ITEM reference ({name}): the subject wears or holds this item naturally, keeping its shape, colours and materials. Ignore how it is displayed in the reference.",
     style: "Visual style: {value}.",
     scene: "Setting and background: {value}.",
     user: "Additional instructions from the user: {value}",
@@ -120,6 +123,8 @@ export const DEFAULTS = {
     tier: "standard",
     poseCredits: 6,
     outfitCredits: 6,
+    sceneCredits: 6,
+    itemCredits: 4,
     maxPerJob: 4,
     dailyLimitPerUser: 20,
     publicReview: true,
@@ -162,6 +167,30 @@ export const DEFAULTS = {
       "Outfit category: {category}.",
       "Notes: {description}."
     ].join("\n"),
+    scenePrompt: [
+      "A photograph of an empty location to use as the background of a fashion photo: no people, no animals, no text, no logos, no watermark.",
+      "Realistic perspective from a camera at eye level, natural light and materials, sharp detail throughout, landscape frame with open space in the middle ground where a person could stand.",
+      "Scene category: {category}.",
+      "Typical setting: {hint}.",
+      "Scene details: {description}."
+    ].join("\n"),
+    sceneRefPrompt: [
+      "Image 1 shows a location. Recreate the same place as a clean background photograph for fashion photos: keep its setting, layout, colours, lighting and mood, and remove every person, animal, text and logo.",
+      "Realistic perspective from a camera at eye level, landscape frame with open space in the middle ground where a person could stand.",
+      "Scene category: {category}.",
+      "Notes: {description}."
+    ].join("\n"),
+    itemPrompt: [
+      "A studio product photograph of a single accessory or prop, shown whole and centred on a seamless light grey background, with soft even lighting and photorealistic materials: no person, no hands, no mannequin, no text, no logos.",
+      "Item category: {category}.",
+      "Typical item: {hint}.",
+      "Item details: {description}."
+    ].join("\n"),
+    itemRefPrompt: [
+      "Image 1 shows an accessory or prop. Recreate the same item, keeping its shape, colours, materials and details, as a studio product photograph: shown whole and centred on a seamless light grey background, soft even lighting, no person, no hands, no text, no logos.",
+      "Item category: {category}.",
+      "Notes: {description}."
+    ].join("\n"),
     angles: {
       "正面": "front view, the figure faces the viewer, camera at chest height",
       "斜め": "three-quarter view, the figure turned about 45 degrees from the viewer, camera at chest height",
@@ -181,6 +210,9 @@ export const DEFAULTS = {
   },
   legal: DEFAULT_LEGAL
 };
+
+// Items (accessories and props) a work may use at once.
+export const MAX_ITEMS = 3;
 
 // Dotted paths whose values are encrypted at rest and never sent back in full.
 const SECRET_PATHS = new Set([
@@ -421,6 +453,8 @@ function sanitize(group, v) {
         tier: pick(v.tier, ["standard", "hd"], d.tier),
         poseCredits: intIn(v.poseCredits, 0, 100000, d.poseCredits),
         outfitCredits: intIn(v.outfitCredits, 0, 100000, d.outfitCredits),
+        sceneCredits: intIn(v.sceneCredits, 0, 100000, d.sceneCredits),
+        itemCredits: intIn(v.itemCredits, 0, 100000, d.itemCredits),
         maxPerJob: intIn(v.maxPerJob, 1, 4, d.maxPerJob),
         dailyLimitPerUser: intIn(v.dailyLimitPerUser, 0, 10000, d.dailyLimitPerUser),
         publicReview: flag(v.publicReview, d.publicReview),
@@ -432,6 +466,10 @@ function sanitize(group, v) {
         poseAnglePrompt: template("poseAnglePrompt"),
         outfitPrompt: template("outfitPrompt"),
         outfitRefPrompt: template("outfitRefPrompt"),
+        scenePrompt: template("scenePrompt"),
+        sceneRefPrompt: template("sceneRefPrompt"),
+        itemPrompt: template("itemPrompt"),
+        itemRefPrompt: template("itemRefPrompt"),
         angles
       };
     }
@@ -511,6 +549,7 @@ export function publicConfig() {
       defaultTier: gen.defaultTier, maxN: gen.maxN,
       styles: gen.styles.map(({ id, label }) => ({ id, label })),
       scenes: gen.scenes.map(({ id, label }) => ({ id, label })),
+      maxItems: MAX_ITEMS,
       personRetentionDays: safety.personRetentionDays
     },
     payment: { providers },
@@ -518,7 +557,8 @@ export function publicConfig() {
     library: { originalDownload: library.originalDownload, showSuggestive: safety.showSuggestive },
     assets: {
       generation: assets.userGeneration && gen.enabled,
-      poseCredits: assets.poseCredits, outfitCredits: assets.outfitCredits, maxPerJob: assets.maxPerJob,
+      poseCredits: assets.poseCredits, outfitCredits: assets.outfitCredits, sceneCredits: assets.sceneCredits,
+      itemCredits: assets.itemCredits, maxPerJob: assets.maxPerJob,
       maxPrice: assets.maxPrice, rebatePercent: assets.rebatePercent, publicReview: assets.publicReview,
       referenceRetentionDays: safety.personRetentionDays
     }
