@@ -56,7 +56,7 @@ export async function openAssetGenerator({ admin = false, type = "pose", source 
   const angles = tree.angles;
   const state = {
     type: source ? "pose" : type, categoryId: null, description: "", angle: angles[0].key, n: 1,
-    file: null, consent: false, publish: true, license: "commercial",
+    file: null, consent: false, publish: true, license: "commercial", gender: "female",
     extraAngles: source ? angles.map((a) => a.key).filter((k) => !(source.groupAngles || []).includes(k)) : []
   };
   const unit = () => (admin ? 0 : cfg[`${state.type}Credits`] ?? 0);
@@ -121,6 +121,9 @@ export async function openAssetGenerator({ admin = false, type = "pose", source 
       field("分类", selectMenu({ label: "分类", value: state.categoryId, filled: true, searchable: true,
         options: categoryOptions(list, { generatable: true }), onChange: (v) => { state.categoryId = v; } }).node,
         SPEC_TEXT[state.type]),
+      state.type === "pose" || state.type === "outfit" ? field(state.type === "pose" ? "人物性别" : "服装款式",
+        seg("性别", [{ value: "female", text: state.type === "pose" ? "女" : "女款" }, { value: "male", text: state.type === "pose" ? "男" : "男款" }],
+          state.gender, (v) => { state.gender = v; render(); })) : null,
       field("描述（选填）", description, "不写描述时，按分类随机设计。"),
       state.type === "pose" && !state.file ? field("拍摄角度", seg("拍摄角度", angles.map((a) => ({ value: a.key, text: a.zh })), state.angle,
         (v) => { state.angle = v; render(); }), "先生成一个角度，满意后可以补全其他角度。") : null,
@@ -153,7 +156,8 @@ export async function openAssetGenerator({ admin = false, type = "pose", source 
       if (source) payload = { sourceAssetId: source.id, angles: state.extraAngles };
       else {
         payload = { type: state.type, categoryId: state.categoryId, description: state.description.trim(), n: state.n,
-          angle: state.type === "pose" ? state.angle : undefined };
+          angle: state.type === "pose" ? state.angle : undefined,
+          gender: state.type === "pose" || state.type === "outfit" ? state.gender : undefined };
         if (admin) Object.assign(payload, { publish: state.publish, license: state.license });
         if (state.file) {
           const form = new FormData();

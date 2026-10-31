@@ -113,7 +113,8 @@ const ICONS = {
   coins: "M12 5c4.4 0 8 1.3 8 3s-3.6 3-8 3-8-1.3-8-3 3.6-3 8-3ZM4 8v4c0 1.7 3.6 3 8 3s8-1.3 8-3V8M4 12v4c0 1.7 3.6 3 8 3s8-1.3 8-3v-4",
   tag: "M3 12V4h8l10 10-8 8zM7.5 8.5h.01",
   folder: "M3 6h6l2 2h10v11H3z",
-  layers: "M12 3 3 8l9 5 9-5zM3 13l9 5 9-5"
+  layers: "M12 3 3 8l9 5 9-5zM3 13l9 5 9-5",
+  camera: "M4 8h3.5L9 5.5h6L16.5 8H20v11H4zM12 16.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"
 };
 
 // iOS-style coloured icon tile, e.g. tile("bolt", "orange").

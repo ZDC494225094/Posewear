@@ -15,6 +15,7 @@ export function sameRefsLink(g) {
   if (g.refs?.items?.length) params.set("items", g.refs.items.map((i) => i.id).join(","));
   if (g.style) params.set("style", g.style);
   if (g.scene) params.set("scene", g.scene);
+  if (g.camera) params.set("camera", g.camera);
   return `/studio?${params}`;
 }
 

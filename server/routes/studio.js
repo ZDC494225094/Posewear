@@ -45,6 +45,8 @@ const body = (req) => ({
   prompt: req.body?.prompt,
   style: req.body?.style || "",
   scene: req.body?.scene || "",
+  camera: req.body?.camera || "",
+  realism: v.bool(req.body?.realism),
   ratio: req.body?.ratio,
   tier: req.body?.tier,
   quality: req.body?.quality,

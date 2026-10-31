@@ -6,12 +6,17 @@ import { pageHead, section, form } from "../kit.js";
 const FIELDS = [
   ["intro", "开头（有参考图时）", "提示词第一行。"],
   ["textOnlyIntro", "开头（纯文字生成时）", ""],
-  ["pose", "姿势参考说明", "{n} 会替换成图片序号。参考图按 姿势、服装、人物 的顺序发送。"],
+  ["pose", "姿势参考说明", "{n} 会替换成图片序号。参考图按 姿势、服装、人物、场景、物品 的顺序发送。"],
   ["poseDuo", "双人姿势参考说明", ""],
   ["outfit", "服装参考说明", "素材库服装还会自动附上英文关键词。"],
   ["person", "人物参考说明", ""],
-  ["personSafety", "人物照片附加约束", "有人物照片时追加在人物说明之后，建议保留。"],
+  ["personSafety", "真人照片附加约束", "用了真人照片时追加在人物说明之后，建议保留。"],
+  ["virtualPersonSafety", "虚拟人附加约束", "人物是虚拟人时追加在人物说明之后。"],
+  ["sceneImage", "场景图说明", "选了场景素材时使用，选了场景图后“场景行”不再出现。"],
+  ["item", "物品说明", "每件物品一行，{name} 替换为物品的英文分类名。"],
   ["style", "风格行", "{value} 替换为所选风格预设的描述。"],
+  ["camera", "镜头行", "{value} 替换为所选镜头预设的描述。"],
+  ["realism", "真实感增强", "用户打开“真实感增强”时追加，用来减轻 AI 感。"],
   ["scene", "场景行", "{value} 替换为所选场景预设的描述。"],
   ["user", "用户补充描述", "{value} 替换为用户输入的文字。"],
   ["outro", "结尾", "约束输出为单张成片。"]
@@ -29,8 +34,9 @@ export async function render() {
     const v = f.value;
     const fill = (t, vals) => String(t || "").replace(/\{(\w+)\}/g, (a, k) => (k in vals ? vals[k] : a));
     preview.textContent = [v.intro, fill(v.pose, { n: 1 }), `${fill(v.outfit, { n: 2 })} Key pieces: ivory frill knit, denim mini skirt.`,
-      fill(v.person, { n: 3 }), v.personSafety, fill(v.style, { value: "photorealistic fashion photography" }),
-      fill(v.scene, { value: "a lively city street with soft bokeh" }), fill(v.user, { value: "黄昏的天台，逆光，微笑看向镜头" }), v.outro]
+      fill(v.person, { n: 3 }), v.personSafety, fill(v.sceneImage, { n: 4 }), fill(v.item, { n: 5, name: "necklace" }),
+      fill(v.style, { value: "photorealistic fashion photography" }),
+      fill(v.camera, { value: "85mm f/1.4 portrait lens on a full-frame camera, shallow depth of field with smooth bokeh" }), v.realism, fill(v.user, { value: "黄昏的天台，逆光，微笑看向镜头" }), v.outro]
       .filter(Boolean).join("\n");
   };
   box.addEventListener("input", updatePreview);
@@ -41,6 +47,6 @@ export async function render() {
         h("button.btn.btn-primary", { type: "button", onclick: (e) => busy(e.currentTarget, async () => {
           try { await api.put("/api/admin/settings/prompt", { value: f.value }); toast("已保存", { type: "success" }); } catch (err) { toastError(err); }
         }) }, "保存")]),
-    h("div.prompt-layout", section(null, null, box), section("拼接示例", "姿势 + 服装 + 人物照片 + 风格 + 场景 + 补充描述时，实际发送的内容：", preview)));
+    h("div.prompt-layout", section(null, null, box), section("拼接示例", "姿势 + 服装 + 真人照片 + 场景图 + 一件物品 + 风格 + 镜头 + 真实感 + 补充描述时，实际发送的内容：", preview)));
   return root;
 }

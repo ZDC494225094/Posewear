@@ -76,6 +76,19 @@ export const DEFAULTS = {
       { id: "garden", label: "花园", prompt: "a blooming garden in spring" },
       { id: "home", label: "居家", prompt: "a bright, minimal living room" }
     ],
+    // Camera and lens looks. Naming real gear and its side effects (grain,
+    // depth of field, flash falloff) makes images read as photographs.
+    cameras: [
+      { id: "phone", label: "手机直出", prompt: "shot on a recent smartphone's main camera, natural HDR, slightly wide perspective, fine sensor noise in the shadows, unedited" },
+      { id: "35mm", label: "35mm 纪实", prompt: "35mm lens at f/2.8 on a full-frame camera, documentary framing, natural perspective, available light" },
+      { id: "50mm", label: "50mm 标准", prompt: "50mm f/1.8 lens on a full-frame camera, true-to-eye perspective, gentle background blur" },
+      { id: "85mm", label: "85mm 人像", prompt: "85mm f/1.4 portrait lens on a full-frame camera, shallow depth of field with smooth bokeh, flattering compression" },
+      { id: "135mm", label: "135mm 长焦", prompt: "135mm f/2 telephoto lens, strong background compression, subject cleanly separated from the background" },
+      { id: "24mm", label: "24mm 广角", prompt: "24mm wide-angle lens, environmental portrait that shows the surroundings, mild perspective stretch at the edges" },
+      { id: "film", label: "胶片", prompt: "shot on 35mm colour film (Kodak Portra 400), fine natural grain, soft highlight roll-off, true film colours" },
+      { id: "flash", label: "直闪", prompt: "on-camera direct flash, hard shadow just behind the subject, bright skin highlights, candid snapshot feel" },
+      { id: "studio-strobe", label: "影棚闪光", prompt: "medium-format camera with studio strobes and a large softbox, crisp detail, soft controlled shadows" }
+    ],
     tokenPriceUsd: { textInput: 5, imageInput: 8, imageOutput: 30 },
     fallbackCostUsd: { low: 0.006, medium: 0.053, high: 0.211 },
     usdToCny: 7.2
@@ -93,6 +106,8 @@ export const DEFAULTS = {
     item: "Image {n} is an ITEM reference ({name}): the subject wears or holds this item naturally, keeping its shape, colours and materials. Ignore how it is displayed in the reference.",
     style: "Visual style: {value}.",
     scene: "Setting and background: {value}.",
+    camera: "Camera and lens: {value}.",
+    realism: "Make it look like a real, unretouched photograph: natural skin texture with pores and fine hair, slight asymmetry, real fabric creases, physically plausible light and shadows. Avoid the smooth, glossy, over-sharpened or over-saturated look of AI images.",
     user: "Additional instructions from the user: {value}",
     outro: "Output a single finished image, not a collage, comparison sheet or reference board. Do not add text, captions, labels, frames or watermarks."
   },
@@ -132,7 +147,7 @@ export const DEFAULTS = {
     rebatePercent: 70,
     commercialOnly: false,
     posePrompt: [
-      "A clean pose-reference drawing: black line art of one female artist's mannequin on a pure white background.",
+      "A clean pose-reference drawing: black line art of one {figure} artist's mannequin on a pure white background.",
       "The mannequin has a smooth egg-shaped head with one vertical and one horizontal guide line showing where the face points, no facial features and no hair, ball joints at the shoulders, elbows, wrists, hips, knees and ankles, simple anatomical body contours with a few light construction lines, and detailed hands and feet.",
       "Thin, even black outlines only: no shading, no colour, no clothing, no floor, no shadow, no text. The whole body is visible with a small margin, centred in a portrait frame.",
       "Pose category: {category}.",
@@ -141,7 +156,7 @@ export const DEFAULTS = {
       "Camera: {angle}."
     ].join("\n"),
     poseRefPrompt: [
-      "Image 1 shows a person or figure in a pose. Redraw only that body pose as a clean pose-reference drawing: black line art of one female artist's mannequin on a pure white background.",
+      "Image 1 shows a person or figure in a pose. Redraw only that body pose as a clean pose-reference drawing: black line art of one {figure} artist's mannequin on a pure white background.",
       "The mannequin has a smooth egg-shaped head with one vertical and one horizontal guide line showing where the face points, no facial features and no hair, ball joints at the shoulders, elbows, wrists, hips, knees and ankles, simple anatomical body contours, and detailed hands and feet.",
       "Match the pose, limb positions, head direction and camera angle of image 1. Ignore its clothing, face, hair, body shape, props and background.",
       "Thin, even black outlines only: no shading, no colour, no clothing, no floor, no shadow, no text. The whole body is visible with a small margin, centred in a portrait frame.",
@@ -153,7 +168,7 @@ export const DEFAULTS = {
       "Keep the same drawing style: black line art on a pure white background, egg-shaped head with guide lines, ball joints, no shading, no colour, no floor, no text. The whole body is visible with a small margin, centred in a portrait frame."
     ].join("\n"),
     outfitPrompt: [
-      "A product render of one complete women's outfit on an invisible mannequin (ghost mannequin style): the garments keep the 3D shape of a slim adult body, but no person, skin, face or hands are visible.",
+      "A product render of one complete {wearer} outfit on an invisible mannequin (ghost mannequin style): the garments keep the 3D shape of a slim adult body, but no person, skin, face or hands are visible.",
       "Show the whole look from head to toe in front view, centred in a portrait frame: any hat or headwear floats above the collar, the shoes stand below the hem, and a bag or small accessory may hang beside the outfit.",
       "Photorealistic fabrics, stitching and details, soft even studio lighting, a seamless light grey gradient background, no props, no text, no logos.",
       "Outfit category: {category}.",
@@ -402,6 +417,7 @@ function sanitize(group, v) {
         dailyLimitPerUser: intIn(v.dailyLimitPerUser, 0, 100000, d.dailyLimitPerUser),
         styles: presetList(v.styles, d.styles),
         scenes: presetList(v.scenes, d.scenes),
+        cameras: presetList(v.cameras, d.cameras),
         tokenPriceUsd: {
           textInput: numIn(price.textInput, 0, 1000, d.tokenPriceUsd.textInput),
           imageInput: numIn(price.imageInput, 0, 1000, d.tokenPriceUsd.imageInput),
@@ -549,6 +565,7 @@ export function publicConfig() {
       defaultTier: gen.defaultTier, maxN: gen.maxN,
       styles: gen.styles.map(({ id, label }) => ({ id, label })),
       scenes: gen.scenes.map(({ id, label }) => ({ id, label })),
+      cameras: gen.cameras.map(({ id, label }) => ({ id, label })),
       maxItems: MAX_ITEMS,
       personRetentionDays: safety.personRetentionDays
     },

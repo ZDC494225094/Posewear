@@ -357,6 +357,33 @@ export const ITEM_TREE = [
   }
 ];
 
+// Professions added under 职业服装 by migration 4.
+export const MORE_PROFESSIONS = [
+  ["security", "保安", "Security guard", "security guard uniform: dark shirt and trousers, plain shoulder patches, duty belt, cap; no real company logos or badge text"],
+  ["worker", "工人", "Worker", "factory or construction worker: sturdy work jacket or overalls with high-visibility details, work gloves, safety boots, optional hard hat"],
+  ["courier", "快递员", "Courier", "parcel courier: polo shirt or jacket in one strong colour, cargo trousers, cap, crossbody bag; no real company logos"],
+  ["delivery-rider", "外卖骑手", "Delivery rider", "food delivery rider: bright windbreaker, helmet, insulated delivery backpack; no real company logos"],
+  ["mechanic", "机修工", "Mechanic", "mechanic: work overalls with tool pockets, work gloves, safety boots"],
+  ["lawyer", "律师", "Lawyer", "lawyer: dark tailored suit, crisp shirt, conservative tie or blouse, leather briefcase"]
+];
+
+// Add minor categories under an existing major, skipping keys already there.
+export function addMinors(db, type, majorKey, rows, now = Date.now()) {
+  const major = db.prepare("SELECT id FROM asset_categories WHERE type = ? AND key = ? AND parent_id IS NULL").get(type, majorKey);
+  if (!major) return 0;
+  const exists = db.prepare("SELECT 1 FROM asset_categories WHERE parent_id = ? AND key = ?");
+  const last = db.prepare("SELECT COALESCE(MAX(sort), 0) AS s FROM asset_categories WHERE parent_id = ?").get(major.id).s;
+  const insert = db.prepare(`INSERT INTO asset_categories (type, parent_id, key, name_zh, name_en, hint, rating,
+    gen_enabled, sort, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'general', 1, ?, ?, ?)`);
+  let added = 0;
+  for (const [key, zh, en, hint] of rows) {
+    if (exists.get(major.id, key)) continue;
+    added += 1;
+    insert.run(type, major.id, key, zh, en, hint, last + added * 10, now, now);
+  }
+  return added;
+}
+
 // Where the imported outfit categories sit in the tree.
 export const UPSTREAM_OUTFIT_SERIES = {
   spring: "daily", summer: "daily", autumn: "daily", winter: "daily",

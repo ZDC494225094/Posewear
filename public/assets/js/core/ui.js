@@ -32,7 +32,7 @@ export function modal({ title, content, footer, wide = false, onClose, label } =
   const backdrop = h("div.modal-backdrop", dialog);
   backdrop.addEventListener("mousedown", (e) => { if (e.target === backdrop) close(); });
   const onKey = (e) => {
-    if (menuOpen()) return; // an open drop-down handles Esc and Tab itself
+    if (menuOpen() || zoomOpen) return; // an open drop-down or zoom view handles its own keys
     if (e.key === "Escape") { e.stopPropagation(); close(); }
     if (e.key === "Tab") {
       const focusables = [...dialog.querySelectorAll("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])")]
@@ -103,11 +103,141 @@ export async function copyText(text) {
   }
 }
 
+// ---------- zoom: one image at full resolution, full screen
+// Wheel or pinch zooms around the pointer, dragging pans, double-click
+// switches between "fit" and 100%. Keys: + / - zoom, 0 fits, Esc closes.
+
+let zoomOpen = false;
+
+export function zoomImage(src, { alt = "" } = {}) {
+  const opener = document.activeElement;
+  const img = h("img.zoom-img", { src, alt, draggable: false });
+  const stage = h("div.zoom-stage", img);
+  const level = h("span.zoom-level.num", "—");
+  const tool = (text, label, onclick) => h("button.zoom-btn", { type: "button", "aria-label": label, title: label, onclick }, text);
+  const root = h("div.zoom-root", { role: "dialog", "aria-modal": "true", "aria-label": "查看原图", tabIndex: -1 },
+    stage,
+    h("div.zoom-bar",
+      tool("−", "缩小", () => zoomBy(1 / 1.25)), level, tool("+", "放大", () => zoomBy(1.25)),
+      tool("1:1", "原始大小", () => zoomTo(1)), tool("适应", "适应屏幕", fit),
+      h("a.zoom-btn", { href: src, target: "_blank", rel: "noopener", "data-native": "", title: "新窗口打开" }, "↗"),
+      tool("×", "关闭", () => close())),
+    h("p.zoom-hint", "滚轮或双指缩放，拖动查看细节，双击切换适应 / 原始大小"));
+  let scale = 1, x = 0, y = 0, fitScale = 1, fitted = true;
+  const pointers = new Map();
+  let pinch = null;
+
+  const box = () => stage.getBoundingClientRect();
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  function apply() {
+    img.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+    level.textContent = `${Math.round(scale * 100)}%`;
+  }
+  function fit() {
+    if (!img.naturalWidth) return;
+    const r = box();
+    fitScale = Math.min(r.width / img.naturalWidth, r.height / img.naturalHeight, 1);
+    scale = fitScale;
+    x = (r.width - img.naturalWidth * scale) / 2;
+    y = (r.height - img.naturalHeight * scale) / 2;
+    fitted = true;
+    apply();
+  }
+  // Zoom so the image point under (px, py) stays put.
+  function zoomAt(next, px, py) {
+    next = clamp(next, Math.min(fitScale, 0.05), 8);
+    const k = next / scale;
+    x = px - (px - x) * k;
+    y = py - (py - y) * k;
+    scale = next;
+    fitted = false;
+    apply();
+  }
+  const center = () => { const r = box(); return [r.width / 2, r.height / 2]; };
+  const zoomBy = (factor) => zoomAt(scale * factor, ...center());
+  const zoomTo = (value) => zoomAt(value, ...center());
+
+  img.addEventListener("load", fit);
+  if (img.complete) requestAnimationFrame(fit);
+  stage.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const r = box();
+    zoomAt(scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX - r.left, e.clientY - r.top);
+  }, { passive: false });
+  stage.addEventListener("dblclick", (e) => {
+    const r = box();
+    if (fitted || scale < 0.99) zoomAt(1, e.clientX - r.left, e.clientY - r.top);
+    else fit();
+  });
+  stage.addEventListener("pointerdown", (e) => {
+    stage.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y), scale };
+    }
+    stage.classList.add("is-dragging");
+  });
+  stage.addEventListener("pointermove", (e) => {
+    const prev = pointers.get(e.pointerId);
+    if (!prev) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size === 2 && pinch) {
+      const [a, b] = [...pointers.values()];
+      const r = box();
+      zoomAt(pinch.scale * (Math.hypot(a.x - b.x, a.y - b.y) / pinch.dist), (a.x + b.x) / 2 - r.left, (a.y + b.y) / 2 - r.top);
+      return;
+    }
+    x += e.clientX - prev.x;
+    y += e.clientY - prev.y;
+    fitted = false;
+    apply();
+  });
+  const release = (e) => {
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) pinch = null;
+    if (!pointers.size) stage.classList.remove("is-dragging");
+  };
+  stage.addEventListener("pointerup", release);
+  stage.addEventListener("pointercancel", release);
+
+  const onKey = (e) => {
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); }
+    else if (e.key === "+" || e.key === "=") zoomBy(1.25);
+    else if (e.key === "-" || e.key === "_") zoomBy(1 / 1.25);
+    else if (e.key === "0") fit();
+    else if (e.key === "Tab") {
+      const focusables = [...root.querySelectorAll("button, [href]")];
+      const first = focusables[0], last = focusables.at(-1);
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+    else return;
+    e.stopPropagation();
+  };
+  const onResize = () => { if (fitted) fit(); };
+  document.addEventListener("keydown", onKey, true);
+  window.addEventListener("resize", onResize);
+  document.body.append(root);
+  zoomOpen = true;
+  requestAnimationFrame(() => root.focus());
+  function close() {
+    document.removeEventListener("keydown", onKey, true);
+    window.removeEventListener("resize", onResize);
+    root.remove();
+    zoomOpen = false;
+    opener?.focus?.();
+  }
+  return { close };
+}
+
 // ---------- lightbox: one image at a time with prev/next
+// Clicking the image opens it full screen with zoom (item.zoomSrc, else src).
 
 export function lightbox(items, start = 0, { renderAside } = {}) {
   let index = start;
-  const img = h("img.lightbox-img", { alt: "" });
+  const img = h("img.lightbox-img", { alt: "", title: "点击查看原图，可缩放",
+    onclick: () => { const item = items[index]; zoomImage(item.zoomSrc || item.src, { alt: item.alt }); } });
   const aside = h("div.lightbox-aside");
   const counter = h("span.faint.small.num");
   const prev = h("button.lightbox-nav.prev", { type: "button", "aria-label": "上一张", onclick: () => go(-1) }, icon("arrowLeft", 22));

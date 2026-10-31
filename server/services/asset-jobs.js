@@ -52,15 +52,45 @@ export function fillTemplate(template, values) {
   }).filter(Boolean).join("\n");
 }
 
-function buildPrompt({ type, major, minor, description, angle, withRef, fromPose }) {
+// Variants a job can ask for, so one category can be made several different
+// ways: gender picks the figure or wearer in the pose and outfit templates;
+// season and time of day add a hint to the description. [中文, English hint]
+const SEASONS = {
+  outfit: {
+    "spring-summer": ["春夏", "a spring/summer version in light, breathable fabrics"],
+    "autumn-winter": ["秋冬", "an autumn/winter version with warm layers and heavier fabrics"]
+  },
+  scene: {
+    spring: ["春", "in spring"], summer: ["夏", "in summer"], autumn: ["秋", "in autumn"], winter: ["冬", "in winter, with snow"]
+  }
+};
+const TIMES = { day: ["白天", "in clear daylight"], dusk: ["黄昏", "at golden hour"], night: ["夜晚", "at night, lit by street and window lights"] };
+const GENDER_TYPES = ["pose", "outfit"];
+const GENDER_TEXT = { pose: { female: "女", male: "男" }, outfit: { female: "女款", male: "男款" } };
+
+export function variantLabel({ type, gender, season, time }) {
+  return [gender && GENDER_TEXT[type]?.[gender], season && SEASONS[type]?.[season]?.[0], time && TIMES[time]?.[0]]
+    .filter(Boolean).join(" · ");
+}
+
+function buildPrompt({ type, major, minor, description, angle, withRef, fromPose, gender, season, time }) {
   const cfg = settings.get("assets");
   const template = type === "pose" && fromPose ? cfg.poseAnglePrompt : cfg[`${type}${withRef ? "RefPrompt" : "Prompt"}`];
-  return fillTemplate(template, {
+  const details = [season && SEASONS[type]?.[season]?.[1], time && TIMES[time]?.[1], description].filter(Boolean).join("; ");
+  const male = gender === "male";
+  let prompt = fillTemplate(template, {
     category: minor ? `${minor.name_en || minor.name_zh} (${minor.name_zh}), part of ${major.name_en || major.name_zh} (${major.name_zh})` : "",
     hint: minor?.hint || major?.hint || "",
-    description,
-    angle: type === "pose" ? cfg.angles[angle] || cfg.angles["正面"] : ""
+    description: details,
+    angle: type === "pose" ? cfg.angles[angle] || cfg.angles["正面"] : "",
+    figure: male ? "male" : "female",
+    wearer: male ? "men's" : "women's"
   });
+  // Edited templates without the gender placeholders still get the gender.
+  if (male && !fromPose && GENDER_TYPES.includes(type) && !/\{(figure|wearer)\}/.test(template)) {
+    prompt += type === "pose" ? "\nDraw a male mannequin." : "\nDesign it as a men's outfit.";
+  }
+  return prompt;
 }
 
 // ---------- create
@@ -87,7 +117,10 @@ function validate(user, input, { admin }) {
     const requested = [...new Set((Array.isArray(input.angles) ? input.angles : [input.angle]).map(String))];
     const angles = requested.filter((a) => ANGLE_KEYS.includes(a) && !taken.has(a));
     if (!angles.length) throw badRequest("ANGLES_EXIST", "请选择还没有的角度");
-    return { type: "pose", source, angles, description: "" };
+    // New angles keep the variant of the pose they extend.
+    const job = source.job_id ? db.prepare("SELECT params FROM generations WHERE id = ?").get(source.job_id) : null;
+    const gender = JSON.parse(job?.params || "{}").gender || "";
+    return { type: "pose", source, angles, description: "", gender, season: "", time: "", name: "" };
   }
 
   const type = v.oneOf(input.type, "type", library.ASSET_TYPES);
@@ -99,7 +132,16 @@ function validate(user, input, { admin }) {
   const angle = type === "pose" ? v.oneOf(input.angle || "正面", "angle", ANGLE_KEYS) : "";
   const ref = input.referenceUploadId ? uploads.getOwnedUpload(user, input.referenceUploadId, "reference") : null;
   if (ref && !ref.consent_at) throw badRequest("CONSENT_REQUIRED", "请先确认参考图的使用授权");
-  return { type, major, minor, n, angle, description, ref };
+  const pick = (value, allowed, label) => {
+    if (!value) return "";
+    if (!allowed.includes(value)) throw badRequest("INVALID_INPUT", `${label}取值不正确`);
+    return value;
+  };
+  const gender = GENDER_TYPES.includes(type) ? pick(input.gender, ["female", "male"], "性别") : "";
+  const season = SEASONS[type] ? pick(input.season, Object.keys(SEASONS[type]), "季节") : "";
+  const time = type === "scene" ? pick(input.time, Object.keys(TIMES), "时段") : "";
+  const name = v.str(input.name, "name", { optional: true, max: 40 });
+  return { type, major, minor, n, angle, description, ref, gender, season, time, name };
 }
 
 export function unitCost(type, { admin = false } = {}) {
@@ -107,67 +149,102 @@ export function unitCost(type, { admin = false } = {}) {
   return settings.get("assets")[`${type}Credits`] ?? 0;
 }
 
+// The asset's name: the owner's own, or the description, or the category with
+// its variant ("警察 · 男款 · 秋冬").
+function assetName(r) {
+  if (r.name) return r.name;
+  const variant = variantLabel(r);
+  if (!variant) return (r.description || r.minor.name_zh).slice(0, 36);
+  return [r.minor.name_zh, variant, r.description].filter(Boolean).join(" · ").slice(0, 36);
+}
+
 export function createJobs(user, input, { admin = false, ip = null } = {}) {
   enforce(`assetgen:${user.id}`, 12, 60_000, "提交太频繁，请稍后再试");
   const r = validate(user, input, { admin });
+  return insertJobs(user, [r], { admin, ip, publish: input.publish, license: input.license });
+}
+
+// Several different assets in one go, e.g. police, nurse and worker uniforms,
+// or one category in several variants. Each row becomes one job and one image;
+// identical rows are refused. Credits are taken for all rows or none.
+export function createBatch(user, input, { admin = false, ip = null } = {}) {
+  enforce(`assetgen:${user.id}`, 12, 60_000, "提交太频繁，请稍后再试");
+  const items = Array.isArray(input.items) ? input.items : [];
+  const max = admin ? 60 : 20;
+  if (!items.length) throw badRequest("INVALID_INPUT", "请至少选择一个要生成的素材");
+  if (items.length > max) throw badRequest("BATCH_TOO_LARGE", `一次最多生成 ${max} 个素材`);
+  const seen = new Set();
+  const list = items.map((item) => {
+    const r = validate(user, { type: input.type, categoryId: item?.categoryId, description: item?.description, gender: item?.gender,
+      season: item?.season, time: item?.time, angle: item?.angle, name: item?.name, n: 1 }, { admin });
+    const key = [r.minor.id, r.gender, r.season, r.time, r.angle, r.description.trim()].join("|");
+    if (seen.has(key)) throw badRequest("DUPLICATE_ITEM", `「${r.minor.name_zh}」有两行完全相同，请删掉其中一行`);
+    seen.add(key);
+    return r;
+  });
+  return insertJobs(user, list, { admin, ip, publish: input.publish, license: input.license });
+}
+
+// Plan, check limits, charge and queue the jobs for validated requests.
+function insertJobs(user, list, { admin, ip, publish, license: adminLicense }) {
   if (!channels.hasUsableChannel()) throw new HttpError(503, "NO_CHANNEL", "生成服务尚未配置完成，请联系管理员");
   const cfg = settings.get("assets");
   const gen = settings.get("generation");
-  const plan = r.source ? r.angles.map((angle) => ({ angle, n: 1 })) : [{ angle: r.angle, n: r.n }];
+  const steps = list.flatMap((r) => (r.source ? r.angles.map((angle) => ({ r, angle, n: 1 })) : [{ r, angle: r.angle, n: r.n }]));
 
   const active = db.prepare("SELECT COUNT(*) AS n FROM generations WHERE user_id = ? AND status IN ('queued','running')")
     .get(user.id).n;
-  const maxActive = admin ? Math.max(20, gen.maxActivePerUser) : gen.maxActivePerUser;
-  if (active + plan.length > maxActive) {
+  const maxActive = admin ? Math.max(60, gen.maxActivePerUser) : Math.max(gen.maxActivePerUser, list.length > 1 ? 20 : 0);
+  if (active + steps.length > maxActive) {
     throw new HttpError(429, "TOO_MANY_ACTIVE", `最多同时进行 ${maxActive} 个任务，请等当前任务完成`);
   }
   if (!admin && cfg.dailyLimitPerUser > 0) {
     const today = db.prepare("SELECT COUNT(*) AS n FROM generations WHERE user_id = ? AND kind = 'asset' AND created_at >= ?")
       .get(user.id, startOfLocalDay()).n;
-    if (today + plan.length > cfg.dailyLimitPerUser) {
-      throw new HttpError(429, "DAILY_LIMIT", `今日素材生成次数已达上限（${cfg.dailyLimitPerUser} 次），明天再来吧`);
+    if (today + steps.length > cfg.dailyLimitPerUser) {
+      throw new HttpError(429, "DAILY_LIMIT", `今日素材生成次数已达上限（${cfg.dailyLimitPerUser} 次），还能生成 ${Math.max(0, cfg.dailyLimitPerUser - today)} 个`);
     }
   }
-
-  const unit = unitCost(r.type, { admin });
-  const size = flexibleSize(SPEC[r.type].ratio, cfg.tier);
-  const source = r.source;
-  const columns = source
-    ? { series: source.series, series_zh: source.series_zh, series_en: source.series_en, category: source.category,
-      category_zh: source.category_zh, category_en: source.category_en, category_ja: source.category_ja }
-    : library.categoryColumns(r.minor);
-  const categoryLabel = source ? `${source._series.zh} · ${source._category.zh}` : `${r.major.name_zh} · ${r.minor.name_zh}`;
-  const name = source ? source.name_zh || source.name : (r.description || r.minor.name_zh).slice(0, 36);
-  const license = admin
-    ? (input.license === "noncommercial" ? "noncommercial" : "commercial")
-    // The platform can't verify rights to an uploaded reference image.
-    : r.ref ? "noncommercial" : "commercial";
 
   const insert = db.prepare(`INSERT INTO generations (id, user_id, status, kind, mode, params, ref_upload_id, source_asset_id,
     prompt_user, prompt_final, ratio, tier, size, quality, n, cost_credits, client_ip, created_at)
     VALUES (?, ?, 'queued', 'asset', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const ids = [];
   tx(() => {
-    for (const step of plan) {
+    for (const { r, angle, n } of steps) {
+      const source = r.source;
+      const unit = unitCost(r.type, { admin });
+      const size = flexibleSize(SPEC[r.type].ratio, cfg.tier);
+      const columns = source
+        ? { series: source.series, series_zh: source.series_zh, series_en: source.series_en, category: source.category,
+          category_zh: source.category_zh, category_en: source.category_en, category_ja: source.category_ja }
+        : library.categoryColumns(r.minor);
+      const categoryLabel = source ? `${source._series.zh} · ${source._category.zh}` : `${r.major.name_zh} · ${r.minor.name_zh}`;
+      const name = source ? source.name_zh || source.name : assetName(r);
+      const license = admin
+        ? (adminLicense === "noncommercial" ? "noncommercial" : "commercial")
+        // The platform can't verify rights to an uploaded reference image.
+        : r.ref ? "noncommercial" : "commercial";
       const id = randomId(12);
-      const cost = unit * step.n;
+      const cost = unit * n;
       const params = {
-        type: r.type, angle: step.angle, description: r.description, categoryId: r.minor?.id ?? null,
+        type: r.type, angle, description: r.description, categoryId: r.minor?.id ?? null,
         categoryLabel, columns, name, license, rating: source ? source.rating : r.minor.rating,
+        gender: r.gender, season: r.season, time: r.time, variantLabel: variantLabel(r),
         // New angles are listed exactly when the pose they extend is.
-        platform: admin, publish: source ? !!source.enabled : admin ? input.publish !== false : true,
+        platform: admin, publish: source ? !!source.enabled : admin ? publish !== false : true,
         groupKey: source?.group_key || null,
         sortBase: source ? source.sort - Math.max(0, ANGLE_KEYS.indexOf(source.angle)) : null,
         sourceName: source ? name : null, assetIds: []
       };
       const prompt = buildPrompt({ type: r.type, major: r.major, minor: r.minor, description: r.description,
-        angle: step.angle, withRef: !!r.ref, fromPose: !!source });
+        angle, withRef: !!r.ref, fromPose: !!source, gender: r.gender, season: r.season, time: r.time });
       if (cost > 0) {
         credits.adjust(user.id, -cost, "asset_generation", { refType: "generation", refId: id,
-          note: `${library.TYPE_LABELS[r.type]}素材 ${step.n} 张 · ${categoryLabel}` });
+          note: `${library.TYPE_LABELS[r.type]}素材 ${n} 张 · ${categoryLabel}` });
       }
       insert.run(id, user.id, r.ref || source ? "edit" : "generate", JSON.stringify(params), r.ref?.id || null,
-        source?.id || null, r.description, prompt, SPEC[r.type].ratio, cfg.tier, size, cfg.quality, step.n, cost, ip, Date.now());
+        source?.id || null, r.description, prompt, SPEC[r.type].ratio, cfg.tier, size, cfg.quality, n, cost, ip, Date.now());
       ids.push(id);
     }
   })();
@@ -181,7 +258,7 @@ export function jobDto(row, { admin = false } = {}) {
   const toDto = admin ? library.adminDto : library.ownerDto;
   return {
     id: row.id, status: row.status, type: p.type, angle: p.type === "pose" ? angleOf(p.angle) : null,
-    category: p.categoryLabel, categoryId: p.categoryId, description: p.description, n: row.n,
+    category: p.categoryLabel, categoryId: p.categoryId, description: p.description, variant: p.variantLabel || "", n: row.n,
     cost: row.cost_credits, refunded: row.refunded_credits, reference: !!row.ref_upload_id,
     sourceAssetId: row.source_asset_id, sourceName: p.sourceName, platform: !!p.platform,
     errorCode: row.error_code, errorMessage: row.error_message,
@@ -297,7 +374,7 @@ function assetFields(job, p, id, i, count) {
     id, type: p.type, group_key: p.groupKey || id, ...p.columns,
     name, name_zh: name, name_en: name,
     angle: angle?.key || "", angle_zh: angle?.zh || "", angle_en: angle?.en || "",
-    keywords: p.type === "pose" ? "" : p.description,
+    keywords: [p.variantLabel, p.type === "pose" ? "" : p.description].filter(Boolean).join(" "),
     thumb_path: `${p.type}/${id}/thumb.webp`, preview_path: p.type === "pose" ? "" : `${p.type}/${id}/preview.webp`,
     original_path: `${p.type}/${id}/original.png`,
     rating: p.rating, enabled: p.publish ? 1 : 0, sort, source: "ai",

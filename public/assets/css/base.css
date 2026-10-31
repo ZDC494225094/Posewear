@@ -247,6 +247,16 @@ p { margin: 0; }
 .check { display: inline-flex; align-items: flex-start; gap: 9px; cursor: pointer; font-size: 14px; line-height: 1.55; }
 .check input { width: 18px; height: 18px; margin: 1px 0 0; accent-color: var(--black); flex: none; }
 
+/* iOS switch (user site and admin) */
+.switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; font-weight: 500; }
+.switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.switch-ui { position: relative; flex: none; width: 44px; height: 26px; border-radius: 980px; background: rgba(120, 120, 128, .16); transition: background-color .2s; }
+.switch-ui::after { content: ""; position: absolute; left: 2px; top: 2px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 3px 8px rgba(0, 0, 0, .15), 0 1px 1px rgba(0, 0, 0, .16); transition: transform .25s cubic-bezier(.3, .7, .3, 1); }
+.switch input:checked + .switch-ui { background: var(--c-green); }
+.switch input:checked + .switch-ui::after { transform: translateX(18px); }
+.switch input:focus-visible + .switch-ui { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+
 /* Pill chips (presets) and iOS segmented controls (exclusive choices). */
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip {

@@ -5,7 +5,7 @@ import { pageHead, section, form } from "../kit.js";
 
 const RATIOS = ["2:3", "3:4", "1:1", "4:3", "3:2", "9:16", "16:9"];
 
-// Editable list of { id, label, prompt } presets (styles, scenes).
+// Editable list of { id, label, prompt } presets (styles, scenes, cameras).
 function presetEditor(title, items, help) {
   const rows = items.map((x) => ({ ...x }));
   const box = h("div.preset-list");
@@ -76,10 +76,11 @@ export async function render() {
   ], value);
   const styles = presetEditor("风格预设", value.styles, "ID 用英文小写；描述用英文写给模型看，例如 photorealistic fashion photography。");
   const scenes = presetEditor("场景预设", value.scenes, "例如 seamless light grey studio backdrop。");
+  const cameras = presetEditor("镜头预设", value.cameras || [], "写清器材和它带来的效果，例如 85mm f/1.4 portrait lens, shallow depth of field。真实的器材描述能让成片更像照片。");
 
   const save = h("button.btn.btn-primary", { type: "button", onclick: (e) => busy(e.currentTarget, async () => {
     try {
-      await api.put("/api/admin/settings/generation", { value: { ...main.value, styles: styles.value, scenes: scenes.value } });
+      await api.put("/api/admin/settings/generation", { value: { ...main.value, styles: styles.value, scenes: scenes.value, cameras: cameras.value } });
       toast("已保存，新设置对之后提交的任务生效", { type: "success" });
     } catch (err) { toastError(err); }
   }) }, "保存设置");
@@ -87,7 +88,7 @@ export async function render() {
   replace(root,
     pageHead("生成与计费", "定价、画质、尺寸和模型请求参数。改动对之后提交的任务生效。", save),
     section(null, null, main.node),
-    section("风格与场景", "显示在创作台的可选项，选中后会把描述拼进提示词。", h("div.a-form", styles.node, scenes.node)),
+    section("风格、场景与镜头", "显示在创作台的可选项，选中后会把描述拼进提示词。", h("div.a-form", styles.node, scenes.node, cameras.node)),
     h("div.a-form-actions.sticky-actions", save.cloneNode(true)));
   root.querySelector(".sticky-actions button").onclick = () => save.click();
   return root;

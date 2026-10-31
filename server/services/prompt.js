@@ -6,9 +6,10 @@ const fill = (template, values) =>
 // Assemble the model prompt from the admin-editable template lines. The image
 // numbers here must match the order images are sent in: pose, outfit, person,
 // scene, items. personKind is "none", "real" (a real person's photo) or
-// "virtual". A scene image replaces the scene preset.
+// "virtual". A scene image replaces the scene preset. camera is a lens preset;
+// realism adds the "real, unretouched photograph" line.
 export function buildPrompt({ pose, outfit, outfitKeywords = "", personKind = "none", style, scene, sceneAsset = null,
-  items = [], userText = "" }) {
+  items = [], camera = null, realism = false, userText = "" }) {
   const p = settings.get("prompt");
   const lines = [];
   let n = 0;
@@ -29,6 +30,8 @@ export function buildPrompt({ pose, outfit, outfitKeywords = "", personKind = "n
   if (sceneAsset) lines.push(fill(p.sceneImage, { n: ++n }));
   for (const item of items) lines.push(fill(p.item, { n: ++n, name: itemName(item) }));
   if (style?.prompt) lines.push(fill(p.style, { value: style.prompt }));
+  if (camera?.prompt) lines.push(fill(p.camera, { value: camera.prompt }));
+  if (realism && p.realism) lines.push(p.realism);
   if (scene?.prompt && !sceneAsset) lines.push(fill(p.scene, { value: scene.prompt }));
   if (userText) lines.push(fill(p.user, { value: userText }));
   lines.push(p.outro);

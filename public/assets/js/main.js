@@ -7,6 +7,7 @@ import { setRouter } from "./core/nav.js";
 const routes = [
   { path: "/", load: () => import("./pages/home.js"), title: "" },
   { path: "/studio", load: () => import("./pages/studio.js"), title: "创作" },
+  { path: "/studio/assets", load: () => import("./pages/studio-assets.js"), title: "素材创作" },
   { path: "/library", load: () => import("./pages/library.js"), title: "素材库" },
   { path: "/explore", load: () => import("./pages/explore.js"), title: "灵感广场" },
   { path: "/works", load: () => import("./pages/works.js"), title: "我的作品", auth: true },

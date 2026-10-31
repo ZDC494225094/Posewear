@@ -68,10 +68,12 @@ export function settingsText(gen) {
   const cfg = store.config.generation;
   const style = cfg.styles.find((s) => s.id === gen.style)?.label;
   const scene = cfg.scenes.find((s) => s.id === gen.scene)?.label;
+  const camera = (cfg.cameras || []).find((c) => c.id === gen.camera)?.label;
   // The base tier (multiplier 1) goes unnamed so "标准" isn't shown twice.
   const tier = cfg.tiers.find((t) => t.id === gen.tier);
   const quality = cfg.qualities.find((q) => q.id === gen.quality)?.label || QUALITY_TEXT[gen.quality] || gen.quality;
-  return [gen.ratio, `${quality}画质`, tier && tier.multiplier !== 1 ? tier.label : null, style, scene].filter(Boolean).join(" · ");
+  return [gen.ratio, `${quality}画质`, tier && tier.multiplier !== 1 ? tier.label : null, style, camera, gen.realism ? "真实感" : null, scene]
+    .filter(Boolean).join(" · ");
 }
 
 // Send a work's references and settings back to the studio. Library assets go
@@ -85,6 +87,7 @@ export function reuseInStudio(gen) {
     ? { source: refs.person.source, id: refs.person.id, url: refs.person.thumb, virtual: refs.person.kind === "virtual" }
     : null;
   draft.patch({ ratio: gen.ratio, tier: gen.tier, quality: gen.quality, n: gen.n, style: gen.style, scene: gen.scene,
+    camera: gen.camera || "", realism: !!gen.realism,
     prompt: gen.prompt || "", pose: null, outfit: null, outfitUpload, sceneAsset: null, items: [], person });
   const params = new URLSearchParams();
   if (refs.pose?.id) params.set("pose", refs.pose.id);
@@ -148,12 +151,14 @@ export function genCard(gen, { onChange, keep } = {}) {
     waiting?.stop();
     waiting = null;
     root.className = `gen is-${gen.status}`;
+    // Every part has a fixed height (one-line head, meta and prompt, a 3:4
+    // picture box, one row of reference thumbnails), so all cards in a list
+    // line up whatever the work's ratio, image count or description.
     const head = h("div.gen-head",
       h("span.gen-status", STATUS_TEXT[gen.status]),
       h("span.gen-time", relative(gen.createdAt)),
       gen.favorite ? h("span.gen-fav", { title: "已收藏" }, icon("heart", 13)) : null,
-      h("span.gen-cost.num", gen.refunded ? `${gen.refunded} 点已退回` : `${number(gen.cost)} 点`),
-      h("span.gen-meta", settingsText(gen)));
+      h("span.gen-cost.num", gen.refunded ? `${gen.refunded} 点已退回` : `${number(gen.cost)} 点`));
     let body;
     if (gen.status === "queued" || gen.status === "running") {
       waiting = waitingView(gen);
@@ -162,13 +167,15 @@ export function genCard(gen, { onChange, keep } = {}) {
       body = h("div.gen-fail", tile("alert", "red"),
         h("div", h("p", gen.errorMessage || "生成失败"), gen.refunded ? h("p.small.muted", `已退回 ${gen.refunded} 点`) : null));
     } else {
-      body = h("div.gen-grid", { class: `n-${Math.min(gen.images.length, 4)}` },
-        gen.images.map((img, i) => h("div.gen-shot",
+      const shown = gen.images.slice(0, 4);
+      body = h("div.gen-grid", { class: `n-${Math.max(1, shown.length)}` },
+        shown.map((img, i) => h("div.gen-shot",
           h("button.gen-shot-open", { type: "button", "aria-label": `查看第 ${i + 1} 张大图`,
             onclick: () => openViewer(gen, i, { onChange: (g) => { if (g) { gen = g; render(); onChange?.(g); } } }) },
-            h("img", { src: img.thumb, alt: `生成结果 ${i + 1}`, loading: "lazy", style: { aspectRatio: `${img.width} / ${img.height}` } })),
+            h("img", { src: img.thumb, alt: `生成结果 ${i + 1}`, loading: "lazy" })),
           h("div.gen-shot-tools",
-            h("a", { href: img.download, download: "", "data-native": "", title: "下载原图", "aria-label": `下载第 ${i + 1} 张` }, icon("download", 16))))));
+            h("a", { href: img.download, download: "", "data-native": "", title: "下载原图", "aria-label": `下载第 ${i + 1} 张` }, icon("download", 16))))),
+        gen.images.length > 1 ? h("span.gen-count", `${gen.images.length} 张`) : null);
     }
     const done = gen.status !== "queued" && gen.status !== "running";
     const canPublish = store.config.showcase.enabled && gen.status === "succeeded" && gen.personKind !== "real";
@@ -178,7 +185,13 @@ export function genCard(gen, { onChange, keep } = {}) {
       done ? actionButton("heart", "pink", gen.favorite ? "取消收藏" : "收藏", () => setFlag({ favorite: !gen.favorite }), { pressed: gen.favorite }) : null,
       done ? actionButton(gen.userHidden ? "eye" : "eyeOff", "gray", gen.userHidden ? "取消隐藏" : "隐藏", () => setFlag({ hidden: !gen.userHidden })) : null,
       done ? actionButton("trash", "red", "删除", remove) : null);
-    replace(root, head, body, h("div.gen-foot", refThumbs(gen), gen.prompt ? h("p.gen-prompt", gen.prompt) : null, actions));
+    replace(root, head,
+      h("p.gen-meta", { title: settingsText(gen) }, settingsText(gen)),
+      h("div.gen-media", body),
+      h("div.gen-foot",
+        refThumbs(gen) || h("div.gen-refs.is-empty", h("span.small.faint", "只用了文字描述")),
+        h("p.gen-prompt", { title: gen.prompt || "" }, gen.prompt || h("span.faint", "没有填写画面描述")),
+        actions));
   }
 
   async function setFlag(patch) {

@@ -11,7 +11,7 @@ const active = (j) => j.status === "queued" || j.status === "running";
 
 export function jobTitle(job) {
   return [TYPE_TEXT[job.type], job.category, job.type === "pose" && job.angle && !job.sourceAssetId ? job.angle.zh : null,
-    job.sourceAssetId ? `补全${job.angle?.zh || ""}角度` : null, `${job.n} 张`].filter(Boolean).join(" · ");
+    job.sourceAssetId ? `补全${job.angle?.zh || ""}角度` : null, job.variant || null, job.n > 1 ? `${job.n} 张` : null].filter(Boolean).join(" · ");
 }
 
 function jobCard(job, { admin, onOpenAsset }) {

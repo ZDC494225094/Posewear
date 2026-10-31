@@ -4,7 +4,7 @@ import { pageHead, settingsForm } from "../kit.js";
 // Settings group "assets": user generation, sharing and revenue split, and
 // the prompt templates for generating library assets.
 
-const PLACEHOLDERS = "可用占位符：{category} 分类名称，{hint} 分类的生成提示，{description} 用户描述，{angle} 拍摄角度。占位符没有内容的那一行会整行省略。";
+const PLACEHOLDERS = "可用占位符：{category} 分类名称，{hint} 分类的生成提示，{description} 用户描述（含季节、时段等细分），{angle} 拍摄角度，{figure} 人物性别（female / male），{wearer} 服装款式（women's / men's）。占位符没有内容的那一行会整行省略。";
 
 export async function render() {
   const fields = [

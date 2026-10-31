@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { config } from "./config.js";
-import { seedCategories, OUTFIT_TREE, UPSTREAM_OUTFIT_SERIES } from "./services/taxonomy-seed.js";
+import { seedCategories, addMinors, OUTFIT_TREE, UPSTREAM_OUTFIT_SERIES, MORE_PROFESSIONS } from "./services/taxonomy-seed.js";
 
 export const db = new Database(config.dbFile);
 db.pragma("journal_mode = WAL");
@@ -487,6 +487,16 @@ const migrations = [
       const broken = conn.pragma(`foreign_key_check(${table})`);
       if (broken.length) throw new Error(`Migration 3 left ${broken.length} broken foreign key(s) in ${table}`);
     }
+  },
+
+  // 4: works record the camera preset and the realism switch; more professions
+  // under 职业服装 (security guard, worker, courier, ...).
+  (conn) => {
+    conn.exec(`
+    ALTER TABLE generations ADD COLUMN camera TEXT NOT NULL DEFAULT '';
+    ALTER TABLE generations ADD COLUMN realism INTEGER NOT NULL DEFAULT 0;
+    `);
+    addMinors(conn, "outfit", "professional", MORE_PROFESSIONS);
   }
 ];
 

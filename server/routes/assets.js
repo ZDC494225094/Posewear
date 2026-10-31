@@ -42,6 +42,13 @@ router.post("/my/asset-jobs", (req, res) => {
   res.status(201).json({ items });
 });
 
+// Several different assets at once: { type, items: [{ categoryId, gender?, season?, time?, angle?, description?, name? }] }.
+router.post("/my/asset-jobs/batch", (req, res) => {
+  const items = assetJobs.createBatch(req.user, req.body || {}, { ip: req.ip });
+  worker.kick();
+  res.status(201).json({ items });
+});
+
 // ?ids=a,b for polling, otherwise the most recent jobs.
 router.get("/my/asset-jobs", (req, res) => {
   const ids = String(req.query.ids || "").split(",").map((s) => s.trim()).filter(Boolean).slice(0, 50);

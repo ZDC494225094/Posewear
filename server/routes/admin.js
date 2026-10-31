@@ -366,6 +366,15 @@ router.post("/admin/asset-jobs", (req, res) => {
   res.status(201).json({ items });
 });
 
+// Platform assets in a batch; same body as the user's batch, plus publish and license.
+router.post("/admin/asset-jobs/batch", (req, res) => {
+  const items = assetJobs.createBatch(req.user, req.body || {}, { admin: true, ip: req.ip });
+  worker.kick();
+  audit(req, "asset.generate_batch", "generation", items.map((j) => j.id).join(","),
+    { type: items[0]?.type, count: items.length });
+  res.status(201).json({ items });
+});
+
 router.get("/admin/asset-jobs", (req, res) => {
   const ids = String(req.query.ids || "").split(",").map((s) => s.trim()).filter(Boolean).slice(0, 50);
   if (ids.length) return res.json({ items: assetJobs.listJobs({ ids, admin: true }) });

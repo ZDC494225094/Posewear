@@ -101,7 +101,7 @@ function refSummary(row, { owner = false } = {}) {
 export function dto(row, images = [], { owner = true } = {}) {
   return {
     id: row.id, status: row.status, mode: row.mode,
-    style: row.style, scene: row.scene, prompt: row.prompt_user,
+    style: row.style, scene: row.scene, camera: row.camera, realism: !!row.realism, prompt: row.prompt_user,
     ratio: row.ratio, tier: row.tier, size: row.size, quality: row.quality, n: row.n,
     cost: row.cost_credits, refunded: row.refunded_credits, assetFee: row.asset_fee,
     errorCode: row.error_code, errorMessage: row.error_message,
@@ -181,6 +181,9 @@ export function validateRequest(user, input) {
   if (input.style && !style) throw badRequest("INVALID_STYLE", "所选风格不存在");
   let scene = input.scene ? gen.scenes.find((s) => s.id === input.scene) : null;
   if (input.scene && !scene) throw badRequest("INVALID_SCENE", "所选场景不存在");
+  const camera = input.camera ? gen.cameras.find((c) => c.id === input.camera) : null;
+  if (input.camera && !camera) throw badRequest("INVALID_CAMERA", "所选镜头不存在");
+  const realism = !!input.realism;
   const userText = v.str(input.prompt, "prompt", { optional: true, max: 1000 });
   const banned = findBannedWord(userText);
   if (banned) throw badRequest("PROMPT_BLOCKED", `描述中包含不允许的内容（“${banned}”），请修改后再试`);
@@ -224,8 +227,8 @@ export function validateRequest(user, input) {
     .map((asset) => ({ asset, price: library.feeFor(asset, user.id) })).filter((f) => f.price > 0);
   const assetFee = assetFees.reduce((sum, f) => sum + f.price, 0);
 
-  return { gen, quality, tier, ratio, n, style, scene, userText, pose, outfit, outfitUpload, person, sceneAsset, items,
-    assetFees, assetFee };
+  return { gen, quality, tier, ratio, n, style, scene, camera, realism, userText, pose, outfit, outfitUpload, person,
+    sceneAsset, items, assetFees, assetFee };
 }
 
 export function estimate(user, input) {
@@ -256,7 +259,8 @@ export function create(user, input, { ip }) {
   const personKind = r.person?.kind || "none";
   const prompt = buildPrompt({
     pose: r.pose, outfit: r.outfit || r.outfitUpload, outfitKeywords: r.outfit?.keywords || "",
-    personKind, style: r.style, scene: r.scene, sceneAsset: r.sceneAsset, items: r.items, userText: r.userText
+    personKind, style: r.style, scene: r.scene, sceneAsset: r.sceneAsset, items: r.items,
+    camera: r.camera, realism: r.realism, userText: r.userText
   });
   const id = randomId(12);
   const now = Date.now();
@@ -267,13 +271,14 @@ export function create(user, input, { ip }) {
     credits.adjust(user.id, -cost, "generation", { refType: "generation", refId: id,
       note: `${r.n} 张 · ${label}${r.assetFee ? ` · 含素材使用费 ${r.assetFee} 点` : ""}` });
     db.prepare(`INSERT INTO generations (id, user_id, status, mode, pose_id, outfit_id, outfit_upload_id, person_upload_id,
-      person_image_id, person_kind, scene_asset_id, item_ids, style, scene, prompt_user, prompt_final, ratio, tier, size,
-      quality, n, cost_credits, asset_fee, consent_at, client_ip, created_at)
-      VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      person_image_id, person_kind, scene_asset_id, item_ids, style, scene, camera, realism, prompt_user, prompt_final,
+      ratio, tier, size, quality, n, cost_credits, asset_fee, consent_at, client_ip, created_at)
+      VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       id, user.id, hasImages ? "edit" : "generate", r.pose?.id || null, r.outfit?.id || null,
       r.outfitUpload?.id || null, r.person?.uploadId || null, r.person?.imageId || null, personKind,
       r.sceneAsset?.id || null, r.items.length ? JSON.stringify(r.items.map((a) => a.id)) : null,
-      r.style?.id || "", r.scene?.id || "", r.userText, prompt, r.ratio, r.tier, flexibleSize(r.ratio, r.tier), r.quality,
+      r.style?.id || "", r.scene?.id || "", r.camera?.id || "", r.realism ? 1 : 0, r.userText, prompt, r.ratio, r.tier,
+      flexibleSize(r.ratio, r.tier), r.quality,
       r.n, cost, r.assetFee, r.person?.consentAt ?? null, ip, now);
     if (r.assetFees.length) fees.hold(id, user.id, r.assetFees);
     library.bumpUse([r.pose?.id, r.outfit?.id, r.sceneAsset?.id, ...r.items.map((a) => a.id)]);
@@ -373,7 +378,7 @@ export function showcase({ offset, size, featuredOnly = false }) {
   return {
     total,
     items: rows.map((r) => ({
-      id: r.id, author: r.author, style: r.style, scene: r.scene, ratio: r.ratio, featured: !!r.featured,
+      id: r.id, author: r.author, style: r.style, scene: r.scene, camera: r.camera, realism: !!r.realism, ratio: r.ratio, featured: !!r.featured,
       refs: refSummary(r), images: map.get(r.id) || [], publishedAt: r.published_at
     }))
   };

@@ -27,6 +27,13 @@ function normalizePerson(p) {
 }
 const personFromUpload = (u) => ({ source: "upload", id: u.id, url: u.thumb || u.url, virtual: u.virtual === "approved" });
 
+// 作品创作 / 素材创作, shared with the asset studio page.
+export function studioTabs(current) {
+  return h("nav.seg.studio-tabs", { "aria-label": "创作类型" },
+    [["works", "/studio", "作品创作"], ["assets", "/studio/assets", "素材创作"]].map(([key, href, text]) =>
+      h("a", { href, "aria-current": key === current ? "page" : null, "aria-pressed": String(key === current) }, text)));
+}
+
 export async function render(ctx) {
   const cfg = store.config.generation;
   const maxItems = cfg.maxItems || 3;
@@ -45,8 +52,12 @@ export async function render(ctx) {
     n: Math.min(cfg.maxN, Math.max(1, Number(saved.n) || 1)),
     style: pick(saved.style, ["", ...cfg.styles.map((s) => s.id)], ""),
     scene: pick(saved.scene, ["", ...cfg.scenes.map((s) => s.id)], ""),
+    camera: pick(saved.camera, ["", ...(cfg.cameras || []).map((c) => c.id)], ""),
+    realism: !!saved.realism,
     prompt: typeof saved.prompt === "string" ? saved.prompt : ""
   };
+  // Scene and items sit behind "更多参考" until opened or used.
+  let moreRefs = !!(saved.moreRefs || state.sceneAsset || state.items.length);
   // Uploads and works belong to whoever made them; drop them if the session changed.
   if (!store.user) { state.person = null; state.outfitUpload = null; }
 
@@ -60,16 +71,19 @@ export async function render(ctx) {
     if (q.items) state.items = await Promise.all(q.items.split(",").filter(Boolean).slice(0, maxItems).map(fetchAsset));
   } catch { toast("链接中的部分素材已下架", { type: "error" }); }
   if (q.style && cfg.styles.some((s) => s.id === q.style)) state.style = q.style;
+  if (q.camera && (cfg.cameras || []).some((c) => c.id === q.camera)) state.camera = q.camera;
+  if (q.sceneId || q.items) moreRefs = true;
   if (q.scene && cfg.scenes.some((s) => s.id === q.scene) && !state.sceneAsset) state.scene = q.scene;
-  if (q.pose || q.outfit || q.sceneId || q.items || q.style || q.scene) history.replaceState({}, "", "/studio");
+  if (q.pose || q.outfit || q.sceneId || q.items || q.style || q.scene || q.camera) history.replaceState({}, "", "/studio");
 
-  const save = () => draft.write(state);
+  const save = () => draft.write({ ...state, moreRefs });
   // A real person's photo limits what it can be combined with; a virtual person doesn't.
   const realPerson = () => !!state.person && !state.person.virtual;
 
   // ---------- reference tiles
 
   const refsEl = h("div.ref-grid");
+  const moreEl = h("div.ref-more-wrap");
   const ruleEl = h("p.ref-rule");
 
   function toolButton(iconName, color, text, onclick) {
@@ -78,7 +92,7 @@ export async function render(ctx) {
 
   function ref({ key, title, optional, iconName, color, filled, image, code, note, fee, emptyText, onPick, tools }) {
     return h("div.ref", { class: `is-${key}` },
-      h("div.ref-label", title, code ? h("span.code.num", code) : optional ? h("span.code", "可选") : null),
+      h("div.ref-label", h("span.ref-title", title), code ? h("span.code.num", { title: code }, code) : optional ? h("span.code", "可选") : null),
       h("button.ref-frame", { type: "button", onclick: onPick, "aria-label": filled ? `更换${title}` : emptyText },
         filled ? h("img", { src: image, alt: title, decoding: "async" })
           : h("div.ref-empty", tile(iconName, color), h("span", emptyText))),
@@ -104,7 +118,7 @@ export async function render(ctx) {
       : h("button.ref-frame", { type: "button", onclick: () => openPicker("item"), "aria-label": "选择物品" },
         h("div.ref-empty", tile("bag", "orange"), h("span", "选择物品")));
     return h("div.ref.is-item",
-      h("div.ref-label", "物品", h("span.code.num", state.items.length ? `${state.items.length}/${maxItems}` : "可选")),
+      h("div.ref-label", h("span.ref-title", "物品"), h("span.code.num", state.items.length ? `${state.items.length}/${maxItems}` : "可选")),
       frame,
       notes.length ? h("p.ref-note", `有物品${notes[0]}`) : fee ? h("p.ref-fee", `使用费 ${fee} 点`) : null,
       h("div.ref-tools",
@@ -115,6 +129,7 @@ export async function render(ctx) {
   function renderRefs() {
     const real = realPerson();
     const poseNote = state.pose ? noteFor(state.pose) || (real && state.pose.people > 1 ? "双人姿势不能搭配真人照片" : "") : "";
+    const extras = [state.sceneAsset ? "场景" : "", state.items.length ? `${state.items.length} 件物品` : ""].filter(Boolean);
     replace(refsEl,
       ref({
         key: "pose", title: "姿势", iconName: "pose", color: "purple", filled: !!state.pose,
@@ -127,7 +142,7 @@ export async function render(ctx) {
       }),
       ref({
         key: "outfit", title: "服装", iconName: "shirt", color: "pink", filled: !!(state.outfit || state.outfitUpload),
-        image: state.outfit?.preview || state.outfitUpload?.url, code: state.outfit?.id || (state.outfitUpload ? "上传" : ""),
+        image: state.outfit?.preview || state.outfitUpload?.url, code: state.outfit?.code || state.outfit?.id || (state.outfitUpload ? "上传" : ""),
         note: noteFor(state.outfit), fee: assetFee(state.outfit), emptyText: "选择服装", onPick: () => openPicker("outfit"),
         tools: [
           toolButton("shuffle", "purple", "随机服装", (e) => busy(e.currentTarget, () => randomize("outfit"))),
@@ -143,8 +158,13 @@ export async function render(ctx) {
           toolButton("photos", "blue", "选择人物", () => openPersonDialog()),
           state.person ? toolButton("close", "gray", "移除人物", () => { state.person = null; update(); }) : null
         ]
-      }),
-      ref({
+      }));
+    replace(moreEl,
+      h("button.ref-more", { type: "button", "aria-expanded": String(moreRefs),
+        onclick: () => { moreRefs = !moreRefs; update(); } },
+        icon("chevron", 14), moreRefs ? "收起场景和物品" : "更多参考：场景、物品",
+        !moreRefs && extras.length ? h("span.ref-more-note", `已选 ${extras.join("、")}`) : null),
+      moreRefs ? h("div.ref-grid.ref-grid-more", ref({
         key: "scene", title: "场景", optional: true, iconName: "mountain", color: "green", filled: !!state.sceneAsset,
         image: state.sceneAsset?.thumb, note: noteFor(state.sceneAsset), fee: assetFee(state.sceneAsset), emptyText: "选择场景",
         onPick: () => openPicker("scene"),
@@ -153,7 +173,7 @@ export async function render(ctx) {
           state.sceneAsset ? toolButton("close", "gray", "移除场景", () => { state.sceneAsset = null; update(); }) : null
         ]
       }),
-      itemsRef());
+      itemsRef()) : null);
     ruleEl.textContent = !state.person
       ? "每一项都可以不选；都不选时，用文字描述也能生成。"
       : real ? "已添加真人照片：只能搭配普通级素材，作品仅自己可见。"
@@ -436,6 +456,12 @@ export async function render(ctx) {
       h("section.panel-sec", sectionHead("text", "gray", "画面描述", counter), promptInput),
       cfg.styles.length ? h("section.panel-sec", sectionHead("palette", "pink", "风格"),
         chips("风格", [{ value: "", text: "不指定" }, ...cfg.styles.map((s) => ({ value: s.id, text: s.label }))], state.style, (v) => { state.style = v; update(); })) : null,
+      (cfg.cameras || []).length ? h("section.panel-sec", sectionHead("camera", "indigo", "镜头", h("span.aside", "让成片更像真实拍摄")),
+        chips("镜头", [{ value: "", text: "不指定" }, ...cfg.cameras.map((c) => ({ value: c.id, text: c.label }))], state.camera,
+          (v) => { state.camera = v; update(); }),
+        h("label.switch.realism-switch", h("input", { type: "checkbox", checked: state.realism, onchange: (e) => { state.realism = e.target.checked; update(); } }),
+          h("span.switch-ui", { "aria-hidden": "true" }),
+          h("span.switch-text", "真实感增强", h("small", "保留皮肤纹理、布料褶皱和自然光影，减轻 AI 感；适合写实风格")))) : null,
       cfg.scenes.length ? h("section.panel-sec", sectionHead("mountain", "green", "快速场景", state.sceneAsset ? h("span.aside", "已选场景图，以场景图为准") : null),
         chips("快速场景", [{ value: "", text: "不指定" }, ...cfg.scenes.map((s) => ({ value: s.id, text: s.label }))], state.sceneAsset ? "" : state.scene,
           (v) => { state.scene = v; update(); }, { disabled: !!state.sceneAsset })) : null,
@@ -555,6 +581,7 @@ export async function render(ctx) {
         personImageId: state.person?.source === "image" ? state.person.id : undefined,
         sceneAssetId: state.sceneAsset?.id, itemIds: state.items.map((a) => a.id),
         prompt: state.prompt.trim(), style: state.style, scene: state.sceneAsset ? "" : state.scene,
+        camera: state.camera, realism: state.realism,
         ratio: state.ratio, tier: state.tier, quality: state.quality, n: state.n
       });
       if (filter === "favorite") { filter = ""; renderFeedTools(); await loadFeed(); }
@@ -591,8 +618,8 @@ export async function render(ctx) {
     h("div.studio-shell",
       h("aside.studio-panel.glass", { "aria-label": "创作设置" },
         h("div.panel-scroll",
-          h("div.panel-title", h("h1", "创作")),
-          h("section.panel-sec", sectionHead("photos", "blue", "参考图"), refsEl, ruleEl),
+          h("div.panel-title", h("h1.sr-only", "创作"), studioTabs("works")),
+          h("section.panel-sec", sectionHead("photos", "blue", "参考图"), refsEl, moreEl, ruleEl),
           settingsEl),
         h("div.panel-foot", actionEl)),
       canvas));
