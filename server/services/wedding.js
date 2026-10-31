@@ -94,12 +94,13 @@ function samplesOf(sceneId) {
       thumb: `/media/wedding/sample/${r.id}/thumb`, url: `/media/wedding/sample/${r.id}/full` }));
 }
 
-function sceneDto(scene, { admin = false } = {}) {
+// viewer: whose image links to sign (none on admin pages).
+function sceneDto(scene, { admin = false, viewer = null } = {}) {
   const plate = plateAsset(scene);
   const out = {
     id: scene.id, key: scene.key, name: scene.name, category: scene.category, categoryText: CATEGORIES[scene.category],
     description: scene.description,
-    plate: plate ? { id: plate.id, thumb: library.dto(plate).thumb, preview: library.dto(plate).preview } : null,
+    plate: plate ? (({ thumb, preview }) => ({ id: plate.id, thumb, preview }))(library.dto(plate, viewer)) : null,
     samples: samplesOf(scene.id),
     recommend: { bride: scene.bride_outfit, groom: scene.groom_outfit, hair: scene.hair, headpiece: scene.headpiece, makeup: scene.makeup }
   };
@@ -140,15 +141,20 @@ function outfitMinor(role, categoryId) {
 
 // ---------- catalog for the wizard
 
+// The wedding catalog shows its own scenes and outfits in full, whatever the
+// viewer has unlocked in the library: they are part of the paid service.
+const serviceViewer = (viewer) => ({ ...viewer, unlocked: true, service: true });
+
 export function catalog(viewer) {
   const c = cfg();
+  viewer = serviceViewer(viewer);
   return {
     enabled: c.enabled && settings.get("generation").enabled,
     packages: c.packages.map((p) => ({ ...p, shots: Math.min(p.shots, c.shots.length), photos: p.looks * Math.min(p.shots, c.shots.length) })),
     extraPhotoPrice: c.extraPhotoPrice, retakePrice: c.retakePrice, freeRetries: c.freeRetries, retentionDays: c.retentionDays,
     maxExtra: MAX_EXTRA, maxPhotos: MAX_PHOTOS, refsPerPerson: REFS_PER_PERSON,
     shots: c.shots.map(({ key, name, people, ratio }) => ({ key, name, people, ratio })),
-    scenes: enabledScenes().map((s) => sceneDto(s)),
+    scenes: enabledScenes().map((s) => sceneDto(s, { viewer })),
     categories: CATEGORIES,
     outfits: { bride: outfitOptions("bride", viewer), groom: outfitOptions("groom", viewer) },
     styling: Object.fromEntries(Object.entries(STYLING).map(([kind, list]) => [kind, list.map(([key, name]) => ({ key, name }))]))
@@ -387,7 +393,8 @@ function imagesOf(genIds) {
   for (const r of rows) {
     if (!map.has(r.generation_id)) map.set(r.generation_id, []);
     map.get(r.generation_id).push({ id: r.id, width: r.width, height: r.height, format: r.format,
-      thumb: `/media/gen/${r.id}/thumb`, url: `/media/gen/${r.id}/full`, download: `/media/gen/${r.id}/full?download=1` });
+      thumb: `/media/gen/${r.id}/thumb`, view: `/media/gen/${r.id}/view`, url: `/media/gen/${r.id}/full`,
+      download: `/media/gen/${r.id}/full?download=1` });
   }
   return map;
 }
@@ -397,6 +404,7 @@ const alive = (row) => row && !row.deleted_at && (!row.expires_at || row.expires
 export function album(user, id, { admin = false } = {}) {
   const shoot = ownedShoot(user, id, { admin });
   const c = cfg();
+  const viewer = serviceViewer(library.viewerFor(user));
   const looks = parse(shoot.looks, []);
   const photos = db.prepare("SELECT * FROM wedding_photos WHERE shoot_id = ? ORDER BY idx").all(shoot.id);
   const genIds = photos.flatMap((p) => [...parse(p.history, []), p.generation_id]).filter(Boolean);
@@ -423,11 +431,11 @@ export function album(user, id, { admin = false } = {}) {
     const outfit = (role) => {
       const minor = taxonomy.get(look[role].categoryId);
       const asset = look[role].assetId ? library.getAsset(look[role].assetId) : null;
-      return { name: minor?.name_zh || "礼服", thumb: asset ? library.dto(asset).thumb : null };
+      return { name: minor?.name_zh || "礼服", thumb: asset ? library.dto(asset, viewer).thumb : null };
     };
     return {
       index: i, scene: scene ? { id: scene.id, name: scene.name, categoryText: CATEGORIES[scene.category],
-        thumb: samplesOf(scene.id)[0]?.thumb || (plateAsset(scene) ? library.dto(plateAsset(scene)).thumb : null) } : { name: "场景已下线" },
+        thumb: samplesOf(scene.id)[0]?.thumb || (plateAsset(scene) ? library.dto(plateAsset(scene), viewer).thumb : null) } : { name: "场景已下线" },
       bride: outfit("bride"), groom: outfit("groom"),
       styling: { hair: styleZh("hair", look.hair), headpiece: styleZh("headpiece", look.headpiece), makeup: styleZh("makeup", look.makeup) }
     };
@@ -683,7 +691,7 @@ export function generateSamples(admin, id, count = 2, { ip = null } = {}) {
   const scene = sceneRow(id);
   if (!scene) throw notFound("场景不存在");
   if (!channels.hasUsableChannel()) throw new HttpError(503, "NO_CHANNEL", "生成服务尚未配置完成");
-  const viewer = { loggedIn: true, userId: admin.id };
+  const viewer = library.viewerFor(admin);
   const options = { bride: outfitOptions("bride", viewer), groom: outfitOptions("groom", viewer) };
   const pickOutfit = (role, key) => {
     const option = options[role].find((o) => o.key === key) || options[role][0];
@@ -733,7 +741,7 @@ export function sampleFile(imageId, variant) {
 export function seed(admin, { dryRun = true, ip = null } = {}) {
   const c = cfg();
   const scenes = enabledScenes();
-  const viewer = { loggedIn: true, userId: admin.id };
+  const viewer = library.viewerFor(admin);
   const plates = scenes.filter((s) => !plateAsset(s) && !["queued", "running"].includes(plateJobStatus(s)));
   const samples = scenes.map((s) => {
     const have = samplesOf(s.id).length + db.prepare("SELECT COUNT(*) AS n FROM generations WHERE shoot_id = ? AND status IN ('queued','running')")

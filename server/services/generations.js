@@ -34,7 +34,7 @@ function imagesFor(ids) {
     if (!map.has(row.generation_id)) map.set(row.generation_id, []);
     map.get(row.generation_id).push({
       id: row.id, idx: row.idx, width: row.width, height: row.height, format: row.format,
-      url: `/media/gen/${row.id}/full`, thumb: `/media/gen/${row.id}/thumb`,
+      url: `/media/gen/${row.id}/full`, thumb: `/media/gen/${row.id}/thumb`, view: `/media/gen/${row.id}/view`,
       download: `/media/gen/${row.id}/full?download=1`
     });
   }
@@ -48,7 +48,7 @@ const itemIdsOf = (row) => {
 function assetRef(id) {
   if (!id) return null;
   const asset = library.getAsset(id);
-  return asset ? { id: asset.id, thumb: library.dto(asset).thumb, name: asset.name_zh || asset.name } : { id };
+  return asset ? { id: asset.id, thumb: library.displayDto(asset).thumb, name: asset.name_zh || asset.name } : { id };
 }
 
 function outfitUploadRef(id, owner) {
@@ -157,10 +157,12 @@ function resolvePerson(user, input, gen) {
 }
 
 // One library reference: it must exist, be the right type, be visible to the
-// user and be allowed for AI generation (with a real person, general only).
+// user, be in what they have unlocked and be allowed for AI generation (with a
+// real person, general only).
 function libraryRef(id, type, { viewer, withPerson, gone, label }) {
   const asset = library.getAsset(id);
   if (!asset || asset.type !== type || !library.visible(asset, viewer)) throw badRequest(gone, `所选${label}已下架，请重新选择`);
+  if (!library.accessible(asset, viewer)) throw forbidden(`这个${label}需要充值解锁后才能使用`, "LIBRARY_LOCKED");
   if (!library.usableForAI(asset, { withPerson })) {
     const code = `${type.toUpperCase()}_NOT_ALLOWED${withPerson ? "_WITH_PERSON" : ""}`;
     throw badRequest(code, withPerson ? `使用真人照片时只能搭配普通级${label}，请换一个或移除人物照片` : `该${label}仅供浏览，不能用于 AI 生成`);
@@ -192,7 +194,7 @@ export function validateRequest(user, input) {
   // The extra rules apply to real people only; a virtual person goes with any
   // pose, outfit, scene or item the user may use for AI generation.
   const withPerson = person?.kind === "real";
-  const viewer = { loggedIn: true, userId: user.id };
+  const viewer = library.viewerFor(user);
 
   let pose = null;
   if (input.poseId) {
@@ -242,8 +244,9 @@ export function create(user, input, { ip }) {
   if (!channels.hasUsableChannel()) {
     throw new HttpError(503, "NO_CHANNEL", "生成服务尚未配置完成，请联系管理员");
   }
-  const active = db.prepare("SELECT COUNT(*) AS n FROM generations WHERE user_id = ? AND status IN ('queued','running')")
-    .get(user.id).n;
+  // Only studio work counts: a wedding album or an asset batch in progress doesn't block the studio.
+  const active = db.prepare(`SELECT COUNT(*) AS n FROM generations WHERE user_id = ? AND status IN ('queued','running')
+    AND kind = 'work' AND shoot_id IS NULL`).get(user.id).n;
   if (active >= r.gen.maxActivePerUser) {
     throw new HttpError(429, "TOO_MANY_ACTIVE", `最多同时进行 ${r.gen.maxActivePerUser} 个任务，请等当前任务完成`);
   }
@@ -368,11 +371,12 @@ export function setPublic(user, id, isPublic) {
 const PUBLIC_WORKS = `FROM generations g JOIN users u ON u.id = g.user_id WHERE g.is_public = 1 AND g.hidden = 0
   AND g.deleted_at IS NULL AND g.status = 'succeeded' AND g.person_kind != 'real' AND u.status = 'active'`;
 
-export function showcase({ offset, size, featuredOnly = false }) {
+// withTotal: false skips counting every public work (the home page shows no total).
+export function showcase({ offset, size, featuredOnly = false, withTotal = true }) {
   const safety = settings.get("safety");
   if (!safety.showcaseEnabled) return { total: 0, items: [] };
   const filter = [safety.showcaseReview ? "AND g.approved = 1" : "", featuredOnly ? "AND g.featured = 1" : ""].join(" ");
-  const total = db.prepare(`SELECT COUNT(*) AS n ${PUBLIC_WORKS} ${filter}`).get().n;
+  const total = withTotal ? db.prepare(`SELECT COUNT(*) AS n ${PUBLIC_WORKS} ${filter}`).get().n : null;
   const rows = db.prepare(`SELECT g.*, u.nickname AS author ${PUBLIC_WORKS} ${filter}
     ORDER BY g.featured DESC, g.published_at DESC LIMIT ? OFFSET ?`).all(size, offset);
   const map = imagesFor(rows.map((r) => r.id));
@@ -402,7 +406,7 @@ export function homeCombos(viewer, limit = 6) {
     const outfit = library.getAsset(row.outfit_id);
     const result = images.get(row.id)?.[0];
     if (!result || !library.visible(pose, viewer) || !library.visible(outfit, viewer)) continue;
-    out.push({ id: row.id, pose: library.dto(pose), outfit: library.dto(outfit), result, style: row.style, ratio: row.ratio });
+    out.push({ id: row.id, pose: library.displayDto(pose), outfit: library.displayDto(outfit), result, style: row.style, ratio: row.ratio });
     if (out.length >= limit) break;
   }
   return out;
@@ -461,5 +465,5 @@ export function adminDelete(id) {
 }
 
 export function featuredForHome(limit = 8) {
-  return showcase({ offset: 0, size: limit, featuredOnly: true }).items;
+  return showcase({ offset: 0, size: limit, featuredOnly: true, withTotal: false }).items;
 }

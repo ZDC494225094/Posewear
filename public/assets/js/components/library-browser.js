@@ -2,7 +2,7 @@ import { h, icon, replace } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { store, draft } from "../core/store.js";
 import { label, number } from "../core/format.js";
-import { toast, toastError, emptyState } from "../core/ui.js";
+import { toast, toastError, emptyState, modal } from "../core/ui.js";
 import { selectMenu } from "../core/select.js";
 import { navigate } from "../core/nav.js";
 
@@ -19,9 +19,32 @@ export async function libraryMeta({ fresh = false } = {}) {
 }
 
 export function usableNote(asset, withPerson) {
+  if (asset.locked) return "需要解锁";
   if (!asset.ai) return "仅供浏览";
   if (withPerson && !asset.aiWithPerson) return "不能与人物照片同用";
   return "";
+}
+
+// What unlocking the library takes, in one sentence.
+export function unlockRule() {
+  const lib = store.config.library;
+  return `${lib.unlockMinYuan ? `累计充值满 ${lib.unlockMinYuan} 元` : "充值任意金额"}后解锁全部素材`;
+}
+
+// Shown when someone opens a locked asset: what the free share is and how to unlock.
+export function unlockPrompt() {
+  const lib = store.config.library;
+  const next = location.pathname + location.search;
+  const m = modal({ title: "充值后解锁全部素材", content: h("div.stack.unlock-prompt",
+    h("div.unlock-art", icon("lock", 26)),
+    h("p", `未充值时，每类素材可以浏览排在最前面的 ${number(lib.freeLimit)} 个。${unlockRule()}，可以查看大图、下载和用于创作。`),
+    store.user ? null : h("p.small.muted", "请先登录，充值后用同一个账号浏览。")),
+  footer: [
+    h("button.btn", { type: "button", onclick: () => m.close() }, "先看看免费的"),
+    store.user
+      ? h("a.btn.btn-primary", { href: "/pricing", onclick: () => m.close() }, "去充值")
+      : h("a.btn.btn-primary", { href: `/login?next=${encodeURIComponent(next)}`, onclick: () => m.close() }, "登录")
+  ] });
 }
 
 // Credits the signed-in user pays to use someone else's shared asset.
@@ -59,10 +82,11 @@ export function libraryBrowser({ type = "pose", mode = "page", withPerson = fals
 
   const filterBar = h("div.lib-filters");
   const summary = h("p.lib-summary.small.muted", { "aria-live": "polite" });
+  const lockNote = h("div.lib-lock-note", { hidden: true });
   const grid = h("div.lib-grid", { class: `is-${state.type}` });
   const more = h("button.btn.lib-more", { type: "button", hidden: true, onclick: () => load(false) }, "加载更多");
   const sheet = h("div.angle-sheet", { hidden: true });
-  const node = h("div.lib-browser", { class: `mode-${mode}` }, filterBar, sheet, summary, grid, h("div.lib-more-wrap", more));
+  const node = h("div.lib-browser", { class: `mode-${mode}` }, filterBar, sheet, lockNote, summary, grid, h("div.lib-more-wrap", more));
 
   let searchTimer = null;
   function setFilter(patch, { reload = true } = {}) {
@@ -160,6 +184,7 @@ export function libraryBrowser({ type = "pose", mode = "page", withPerson = fals
   function card(item) {
     const isGroup = !!item.cover;
     const asset = isGroup ? item.cover : item;
+    if (asset.locked) return lockedCard(asset, isGroup ? item.images.length : 0);
     const note = mode === "picker" ? usableNote(asset, withPerson) : "";
     const angles = isGroup ? item.images.length : 0;
     // Imported outfits have no names, only codes.
@@ -175,6 +200,19 @@ export function libraryBrowser({ type = "pose", mode = "page", withPerson = fals
           h("div.asset-name", name),
           h("div.asset-meta", tags.filter(Boolean).map((m) => h("span", m)), badges(asset)))),
       note ? h("span.asset-flag", note) : null);
+  }
+
+  // Outside the free share: blurred stand-in, the name, and a way to unlock.
+  function lockedCard(asset, angles) {
+    const name = state.type !== "outfit" || asset.generated ? label(asset.name) || asset.id : asset.id;
+    const tags = [label(asset.category), angles > 1 ? `${angles} 个角度` : ""];
+    return h("article.asset-card.is-locked",
+      h("button.asset-hit", { type: "button", "aria-label": `${name}（需要解锁）`, onclick: unlockPrompt },
+        h("div.asset-img", h("img.asset-blur", { src: asset.blur, alt: "", loading: "lazy", decoding: "async", draggable: "false" }),
+          h("span.asset-lock", icon("lock", 15), "充值解锁")),
+        h("div.asset-info",
+          h("div.asset-name", name),
+          h("div.asset-meta", tags.filter(Boolean).map((m) => h("span", m))))));
   }
 
   function pick(item) {
@@ -219,6 +257,12 @@ export function libraryBrowser({ type = "pose", mode = "page", withPerson = fals
       const data = await api.get(path, query);
       if (token !== state.token) return;
       state.total = data.total;
+      lockNote.hidden = !data.locked;
+      if (data.locked) {
+        replace(lockNote, icon("lock", 16),
+          h("span", `未充值可浏览每类前 ${number(store.config.library.freeLimit)} 个，这里还有 ${number(data.locked)} 个需要解锁。${unlockRule()}。`),
+          h("button.btn.btn-sm.btn-primary", { type: "button", onclick: unlockPrompt }, store.user ? "去充值" : "登录"));
+      }
       state.items.push(...data.items);
       if (reset) grid.replaceChildren();
       grid.append(...data.items.map(card));

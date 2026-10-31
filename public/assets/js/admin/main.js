@@ -23,6 +23,7 @@ const NAV = [
     ["/admin/asset-categories", "素材分类", "folder", "blue", () => import("./pages/asset-categories.js")],
     ["/admin/asset-settings", "素材生成与分成", "coins", "yellow", () => import("./pages/asset-settings.js")],
     ["/admin/virtual-persons", "虚拟人审核", "person", "green", () => import("./pages/virtual-persons.js")],
+    ["/admin/library-access", "素材浏览与防盗图", "lock", "indigo", () => import("./pages/library-access.js")],
     ["/admin/safety", "内容安全", "shield", "green", () => import("./pages/safety.js")]
   ]],
   ["婚纱影楼", [
@@ -89,7 +90,7 @@ async function boot() {
   // Pending moderation work shows as a badge in the nav.
   async function refreshBadges() {
     try {
-      const o = await api.get("/api/admin/overview", { days: 7 });
+      const o = await api.get("/api/admin/badges");
       const show = (href, n) => {
         const badge = badges.get(href);
         if (badge) { badge.textContent = String(n || ""); badge.hidden = !n; }
@@ -97,6 +98,7 @@ async function boot() {
       show("/admin/reports", o.pendingReports + o.pendingReview);
       show("/admin/assets", o.pendingAssets);
       show("/admin/virtual-persons", o.pendingVirtual);
+      show("/admin/library-access", o.accessAlerts);
     } catch { /* badge is optional */ }
   }
   document.addEventListener("pw:moderation-changed", refreshBadges);

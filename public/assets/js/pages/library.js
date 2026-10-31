@@ -3,7 +3,7 @@ import { api } from "../core/api.js";
 import { store } from "../core/store.js";
 import { lightbox, toast } from "../core/ui.js";
 import { label, number } from "../core/format.js";
-import { libraryBrowser, libraryMeta, assetFee, useInStudio, TYPE_TEXT } from "../components/library-browser.js";
+import { libraryBrowser, libraryMeta, assetFee, useInStudio, unlockPrompt, TYPE_TEXT } from "../components/library-browser.js";
 import { assetGenerationInfo } from "../components/asset-generation-info.js";
 
 const LICENSE_TEXT = {
@@ -33,16 +33,19 @@ export async function render(ctx) {
   }
 
   async function open(asset, group) {
+    if (asset.locked) { unlockPrompt(); return; }
     let images = group;
     if (asset.type === "pose" && group.length === 1) {
       try { images = (await api.get(`/api/library/assets/${encodeURIComponent(asset.id)}`)).angles; } catch { images = group; }
     }
+    images = images.filter((img) => !img.locked);
     const start = Math.max(0, images.findIndex((x) => x.id === asset.id));
-    lightbox(images.map((img) => ({ src: img.preview, alt: label(img.name), asset: img })), start, {
+    const loginHref = `/login?next=${encodeURIComponent(location.pathname + location.search)}`;
+    // Guests get thumbnails only; the large preview needs an account.
+    lightbox(images.map((img) => ({ src: img.preview || img.thumb, alt: label(img.name), asset: img })), start, {
       renderAside: (item, { close }) => {
         const a = item.asset;
         const policy = store.config.library.originalDownload;
-        const canDownload = policy === "public" || (policy === "login" && store.user);
         const fee = assetFee(a);
         const named = a.type !== "outfit" || a.generated;
         return h("div.viewer-aside",
@@ -58,13 +61,14 @@ export async function render(ctx) {
           h("p.small.muted", LICENSE_TEXT[a.license]),
           a.owner ? h("p.small.muted", `由 @${a.owner.name} 分享${fee ? `，每次使用另付 ${fee} 点，作者获得 ${store.config.assets.rebatePercent}%` : a.price ? "（你的素材，自己使用免费）" : "，免费使用"}。`) : null,
           !a.ai ? h("p.small.pill.pill-pin", "仅供浏览，不能用于 AI 生成") : !a.aiWithPerson ? h("p.small.muted", "不能与真人照片同时使用") : null,
-          a.generated && (a.owner?.id === store.user?.id || store.user?.role === "admin")
+          store.user ? null : h("p.viewer-login.small", "登录后可以查看大图，并用于创作。"),
+          a.generated && store.user && (a.owner?.id === store.user.id || store.user.role === "admin")
             ? assetGenerationInfo(a, { admin: store.user.role === "admin" }) : null,
           h("div.viewer-actions",
             a.ai ? h("button.btn.btn-primary.btn-block", { type: "button", onclick: () => { close(); useInStudio(a); } },
               cicon("sparkle", "yellow"), USE_TEXT[a.type]) : null,
-            canDownload ? h("a.btn.btn-block", { href: `/media/library/${encodeURIComponent(a.id)}/original?download=1`, "data-native": "" }, cicon("download", "green"), "下载原图")
-              : policy === "login" ? h("a.btn.btn-block", { href: `/login?next=${encodeURIComponent(location.pathname + location.search)}`, onclick: close }, "登录后下载原图") : null),
+            a.original ? h("a.btn.btn-block", { href: `${a.original}&download=1`, "data-native": "" }, cicon("download", "green"), "下载原图")
+              : !store.user && policy !== "disabled" ? h("a.btn.btn-block", { href: loginHref, onclick: close }, "登录后查看大图和下载") : null),
           images.length > 1 ? h("p.small.faint", "← → 切换角度") : null);
       }
     });

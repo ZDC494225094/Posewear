@@ -360,6 +360,20 @@ body[data-page="studio"] .header-row.wrap { width: calc(100% - 64px); }
 .asset-meta { display: flex; gap: 8px; margin-top: 3px; font-size: 12px; color: var(--label-3); flex-wrap: wrap; }
 .asset-card.is-disabled .asset-hit { cursor: not-allowed; }
 .asset-card.is-disabled .asset-img img { opacity: .4; }
+/* Locked: outside the free share until the account recharges. */
+.asset-card.is-locked .asset-img { position: relative; overflow: hidden; background: var(--fill-2); }
+.asset-card.is-locked .asset-img .asset-blur { object-fit: cover; filter: blur(10px) saturate(1.1); transform: scale(1.2); opacity: .75; }
+.asset-lock { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 5px; padding: 6px 12px;
+  border-radius: 980px; background: rgba(29, 29, 31, .72); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); color: #fff; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.asset-card.is-locked .asset-name { color: var(--label-2); }
+.lib-lock-note { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 14px; padding: 12px 14px; border-radius: 14px;
+  background: var(--surface); box-shadow: 0 0 0 1px var(--hairline); font-size: 13.5px; color: var(--label-2); }
+.lib-lock-note > span { flex: 1 1 260px; }
+.lib-lock-note > svg { flex: none; color: var(--label); }
+.unlock-prompt { text-align: center; }
+.unlock-art { display: grid; place-items: center; width: 56px; height: 56px; margin: 0 auto; border-radius: 18px; background: var(--black); color: #fff; }
+.viewer-login { padding: 10px 12px; border-radius: 12px; background: var(--fill-2); color: var(--label-2); }
+img.asset-blur, .asset-card img { -webkit-user-drag: none; }
 .asset-flag { position: absolute; left: 8px; top: 8px; padding: 2px 9px; border-radius: 980px; background: rgba(29, 29, 31, .78); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); color: #fff; font-size: 11.5px; font-weight: 500; }
 .lib-more-wrap { display: flex; justify-content: center; padding: 28px 0 0; }
 .angle-sheet { margin-bottom: 16px; padding: 14px; border-radius: 18px; background: var(--fill-2); }
@@ -609,3 +623,5 @@ body[data-page="studio"] .header-row.wrap { width: calc(100% - 64px); }
   .modal { padding: 20px 16px 16px; border-radius: 22px; }
   .gen-grid.n-1 { grid-template-columns: 1fr; }
 }
+.account-library { display: flex; align-items: center; gap: 6px; color: var(--label-2); }
+.pricing-unlock { margin-bottom: 18px; }

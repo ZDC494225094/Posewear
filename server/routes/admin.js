@@ -7,6 +7,7 @@ import * as taxonomy from "../services/taxonomy.js";
 import * as assetJobs from "../services/asset-jobs.js";
 import * as uploads from "../services/uploads.js";
 import * as wedding from "../services/wedding.js";
+import * as guard from "../services/access-guard.js";
 import * as generations from "../services/generations.js";
 import * as billing from "../services/billing.js";
 import * as credits from "../services/credits.js";
@@ -28,6 +29,10 @@ export const router = express.Router();
 router.use("/admin", requireAdmin);
 
 // ---------- dashboard
+
+router.get("/admin/badges", (req, res) => {
+  res.json({ ...stats.pendingCounts(), accessAlerts: guard.recentAlertCount() });
+});
 
 router.get("/admin/overview", (req, res) => {
   res.json({ ...stats.overview({ days: Number(req.query.days) || 30 }), worker: worker.stats() });
@@ -135,9 +140,11 @@ router.get("/admin/users", (req, res) => {
       (SELECT COALESCE(SUM(amount_cents), 0) FROM orders o WHERE o.user_id = u.id AND o.status = 'paid') AS paid_cents
     FROM users u WHERE ${sql} ORDER BY u.id DESC LIMIT ? OFFSET ?`).all(...params, size, offset)
     .map((u) => ({ ...auth.publicUser(u), lastLoginAt: u.last_login_at, lastLoginIp: u.last_login_ip,
-      signupIp: u.signup_ip, note: u.note, generations: u.generations, paidCents: u.paid_cents }));
+      signupIp: u.signup_ip, note: u.note, generations: u.generations, paidCents: u.paid_cents, libraryUnlock: unlockText(u) }));
   res.json({ total, items });
 });
+
+const unlockText = (u) => (u.library_unlock === 1 ? "unlocked" : u.library_unlock === 0 ? "locked" : "auto");
 
 router.get("/admin/users/:id", (req, res) => {
   const user = auth.getUser(Number(req.params.id));
@@ -148,7 +155,7 @@ router.get("/admin/users/:id", (req, res) => {
   const referrer = user.referred_by ? db.prepare("SELECT id, email FROM users WHERE id = ?").get(user.referred_by) : null;
   res.json({
     user: { ...auth.publicUser(user), lastLoginAt: user.last_login_at, lastLoginIp: user.last_login_ip,
-      signupIp: user.signup_ip, note: user.note, referrer },
+      signupIp: user.signup_ip, note: user.note, referrer, libraryUnlock: unlockText(user) },
     ledger, orders, generations: gens, invited
   });
 });
@@ -167,6 +174,10 @@ router.patch("/admin/users/:id", (req, res) => {
   if (req.body?.nickname !== undefined) patch.nickname = v.str(req.body.nickname, "nickname", { min: 1, max: 20 });
   if (req.body?.note !== undefined) patch.note = v.str(req.body.note, "note", { optional: true, max: 500 });
   if (req.body?.emailVerified !== undefined) patch.email_verified = req.body.emailVerified ? 1 : 0;
+  // 素材库: "auto" follows the user's recharges; "unlocked" / "locked" override them.
+  if (req.body?.libraryUnlock !== undefined) {
+    patch.library_unlock = { auto: null, unlocked: 1, locked: 0 }[v.oneOf(req.body.libraryUnlock, "libraryUnlock", ["auto", "unlocked", "locked"])];
+  }
   const keys = Object.keys(patch);
   if (keys.length) {
     db.prepare(`UPDATE users SET ${keys.map((k) => `${k} = ?`).join(", ")}, updated_at = ? WHERE id = ?`)
@@ -395,6 +406,13 @@ router.get("/admin/wedding/shoots", (req, res) => {
 });
 
 router.get("/admin/wedding/shoots/:id", (req, res) => res.json({ shoot: wedding.album(req.user, req.params.id, { admin: true }) }));
+
+// ---------- 访问风控: who tripped the library's scraping limits
+
+router.get("/admin/access-alerts", (req, res) => {
+  const { offset, size } = v.page(req.query, { defaultSize: 30, maxSize: 100 });
+  res.json(guard.listAlerts({ offset, size }));
+});
 
 // ---------- virtual persons
 

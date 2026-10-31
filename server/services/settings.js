@@ -126,8 +126,16 @@ export const DEFAULTS = {
     showcaseEnabled: true,
     showcaseReview: false
   },
+  // Browsing the library: users who have not recharged see the first freeLimit
+  // assets of each type; the rest show locked until they recharge.
   library: {
-    originalDownload: "login"
+    originalDownload: "login",
+    lockEnabled: true,
+    freeLimit: 30,
+    unlockMinYuan: 0,
+    unlockByRedeem: true,
+    previewWatermark: true,
+    dailyPreviews: 1500
   },
   // Asset generation (platform and user), sharing and revenue split. The
   // templates follow the existing asset specs: line-art mannequins for poses,
@@ -537,7 +545,15 @@ function sanitize(group, v) {
       };
     }
     case "library":
-      return { originalDownload: pick(v.originalDownload, ["public", "login", "disabled"], d.originalDownload) };
+      return {
+        originalDownload: pick(v.originalDownload, ["public", "login", "disabled"], d.originalDownload),
+        lockEnabled: flag(v.lockEnabled, d.lockEnabled),
+        freeLimit: intIn(v.freeLimit, 0, 100000, d.freeLimit),
+        unlockMinYuan: intIn(v.unlockMinYuan, 0, 1000000, d.unlockMinYuan),
+        unlockByRedeem: flag(v.unlockByRedeem, d.unlockByRedeem),
+        previewWatermark: flag(v.previewWatermark, d.previewWatermark),
+        dailyPreviews: intIn(v.dailyPreviews, 50, 1000000, d.dailyPreviews)
+      };
     case "assets": {
       const angles = {};
       for (const key of Object.keys(d.angles)) angles[key] = text(v.angles?.[key], d.angles[key], 300).trim() || d.angles[key];
@@ -667,7 +683,8 @@ export function publicConfig() {
     payment: { providers },
     showcase: { enabled: safety.showcaseEnabled },
     wedding: { enabled: get("wedding").enabled && gen.enabled },
-    library: { originalDownload: library.originalDownload, showSuggestive: safety.showSuggestive },
+    library: { originalDownload: library.originalDownload, showSuggestive: safety.showSuggestive,
+      lockEnabled: library.lockEnabled, freeLimit: library.freeLimit, unlockMinYuan: library.unlockMinYuan },
     assets: {
       generation: assets.userGeneration && gen.enabled,
       poseCredits: assets.poseCredits, outfitCredits: assets.outfitCredits, sceneCredits: assets.sceneCredits,

@@ -20,6 +20,18 @@ function series(days, rows, fields) {
   return out;
 }
 
+// Moderation work waiting for an admin: the nav badges, without the whole dashboard.
+export function pendingCounts() {
+  return {
+    pendingReports: db.prepare("SELECT COUNT(*) AS n FROM reports WHERE status = 'open'").get().n,
+    pendingReview: settings.get("safety").showcaseReview ? db.prepare(`SELECT COUNT(*) AS n FROM generations
+      WHERE is_public = 1 AND approved = 0 AND hidden = 0 AND deleted_at IS NULL`).get().n : 0,
+    pendingAssets: db.prepare(`SELECT COUNT(*) AS n FROM assets
+      WHERE review = 'pending' AND visibility = 'public' AND enabled = 1`).get().n,
+    pendingVirtual: pendingVirtualCount()
+  };
+}
+
 export function overview({ days = 30 } = {}) {
   const span = Math.max(7, Math.min(90, days));
   const since = startOfLocalDay() - (span - 1) * DAY;
@@ -57,12 +69,7 @@ export function overview({ days = 30 } = {}) {
   const recentFailures = db.prepare(`SELECT g.id, g.error_code, g.error_message, g.created_at, u.email
     FROM generations g JOIN users u ON u.id = g.user_id WHERE g.status = 'failed' ORDER BY g.created_at DESC LIMIT 6`).all();
   const qualityMix = db.prepare(`SELECT quality, COUNT(*) AS n FROM generations WHERE created_at >= ? GROUP BY quality`).all(since);
-  const pendingReports = db.prepare("SELECT COUNT(*) AS n FROM reports WHERE status = 'open'").get().n;
-  const pendingReview = settings.get("safety").showcaseReview ? db.prepare(`SELECT COUNT(*) AS n FROM generations
-    WHERE is_public = 1 AND approved = 0 AND hidden = 0 AND deleted_at IS NULL`).get().n : 0;
-  const pendingAssets = db.prepare(`SELECT COUNT(*) AS n FROM assets
-    WHERE review = 'pending' AND visibility = 'public' AND enabled = 1`).get().n;
-  const pendingVirtual = pendingVirtualCount();
+  const { pendingReports, pendingReview, pendingAssets, pendingVirtual } = pendingCounts();
 
   const rev = series(span, revDaily, ["revenue"]);
   const signups = series(span, userDaily, ["signups"]);

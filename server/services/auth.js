@@ -1,6 +1,7 @@
 import { db, tx } from "../db.js";
 import * as settings from "./settings.js";
 import * as credits from "./credits.js";
+import * as library from "./library.js";
 import { sendMail, mailEnabled } from "./mailer.js";
 import { hashPassword, verifyPassword, randomToken, randomId, sha256 } from "../lib/crypto.js";
 import { badRequest, conflict, forbidden, unauthorized, notFound } from "../lib/errors.js";
@@ -22,7 +23,9 @@ export function publicUser(row) {
     emailVerified: !!row.email_verified,
     inviteCode: row.invite_code,
     createdAt: row.created_at,
-    checkedInToday: row.last_checkin === localDate()
+    checkedInToday: row.last_checkin === localDate(),
+    // Sees the whole library (otherwise only the free share).
+    libraryUnlocked: !settings.get("library").lockEnabled || library.unlocked(row)
   };
 }
 

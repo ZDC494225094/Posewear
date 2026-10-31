@@ -72,12 +72,12 @@ export function boardPrompt(entries) {
 
 export function openBoardDialog({ pose, outfit, outfitUpload, person, sceneAsset, items = [] }) {
   const entries = [];
-  if (pose) entries.push({ role: "pose", src: pose.preview, code: pose.id });
-  if (outfit) entries.push({ role: "outfit", src: outfit.preview, code: outfit.id });
+  if (pose) entries.push({ role: "pose", src: pose.preview || pose.thumb, code: pose.id });
+  if (outfit) entries.push({ role: "outfit", src: outfit.preview || outfit.thumb, code: outfit.id });
   else if (outfitUpload) entries.push({ role: "outfit", src: outfitUpload.url, code: "" });
   if (person) entries.push({ role: "person", src: person.url, code: "" });
-  if (sceneAsset) entries.push({ role: "scene", src: sceneAsset.preview, code: sceneAsset.id });
-  for (const item of items) entries.push({ role: "item", src: item.preview, code: item.id });
+  if (sceneAsset) entries.push({ role: "scene", src: sceneAsset.preview || sceneAsset.thumb, code: sceneAsset.id });
+  for (const item of items) entries.push({ role: "item", src: item.preview || item.thumb, code: item.id });
   const options = { background: "white", labels: true };
   const canvas = h("canvas.board-canvas", { "aria-label": "参考板预览" });
   const status = h("p.small.muted", { "aria-live": "polite" }, "正在排版…");

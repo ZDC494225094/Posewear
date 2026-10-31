@@ -192,7 +192,7 @@ function insertJobs(user, list, { admin, ip, publish, license: adminLicense }) {
   const gen = settings.get("generation");
   const steps = list.flatMap((r) => (r.source ? r.angles.map((angle) => ({ r, angle, n: 1 })) : [{ r, angle: r.angle, n: r.n }]));
 
-  const active = db.prepare("SELECT COUNT(*) AS n FROM generations WHERE user_id = ? AND status IN ('queued','running')")
+  const active = db.prepare("SELECT COUNT(*) AS n FROM generations WHERE user_id = ? AND status IN ('queued','running') AND kind = 'asset'")
     .get(user.id).n;
   const maxActive = admin ? Math.max(60, gen.maxActivePerUser) : Math.max(gen.maxActivePerUser, list.length > 1 ? 20 : 0);
   if (active + steps.length > maxActive) {

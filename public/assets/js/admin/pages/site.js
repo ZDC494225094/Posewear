@@ -30,11 +30,6 @@ export async function render() {
     { key: "sessionDays", label: "登录有效期（天）", type: "number", min: 1, max: 365 }
   ], { title: "注册与奖励" });
 
-  const library = await settingsForm("library", [
-    { key: "originalDownload", label: "素材原图下载", type: "select", options: [["login", "登录后可下载"], ["public", "所有人可下载"], ["disabled", "关闭下载"]],
-      help: "请按素材授权范围设置。" }
-  ], { title: "素材下载" });
-
   const mail = await settingsForm("mail", [
     { key: "enabled", label: "启用邮件", type: "switch", help: "用于找回密码和邮箱验证。" },
     { key: "host", label: "SMTP 服务器", placeholder: "smtp.exmail.qq.com" },
@@ -57,5 +52,5 @@ export async function render() {
     { key: "contentPolicy", label: "内容规范", type: "textarea", rows: 10, wide: true }
   ], { title: "协议与政策", description: "支持简单 Markdown：# 标题、- 列表、**加粗**。默认文本为模板，请根据你的主体信息修改，并请专业人士审阅。" });
 
-  return h("div", pageHead("站点与注册", "品牌信息、注册奖励、邮件服务和协议文本。"), site, auth, library, mail, mailTest, legal);
+  return h("div", pageHead("站点与注册", "品牌信息、注册奖励、邮件服务和协议文本。"), site, auth, mail, mailTest, legal);
 }

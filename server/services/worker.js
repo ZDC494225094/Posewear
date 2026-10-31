@@ -24,10 +24,12 @@ import { log } from "../lib/logger.js";
 // In-process job queue backed by the generations table. Jobs survive restarts:
 // anything left "running" is put back in the queue on startup.
 
-const running = new Map();          // generation id -> promise
+const running = new Map();          // generation id -> { promise, userId }
 const channelActive = new Map();    // channel id -> in-flight count
+let preparing = 0;                  // claimed jobs that have not reached a channel yet
 let timer = null;
 let stopping = false;
+let lastSweep = 0;
 
 export function start() {
   const recovered = db.prepare("UPDATE generations SET status = 'queued', next_attempt_at = NULL WHERE status = 'running'").run();
@@ -40,7 +42,7 @@ export function start() {
 export async function stop() {
   stopping = true;
   if (timer) clearInterval(timer);
-  await Promise.allSettled([...running.values()]);
+  await Promise.allSettled([...running.values()].map((r) => r.promise));
 }
 
 export function kick() {
@@ -51,21 +53,60 @@ export function stats() {
   return { running: running.size, channelActive: Object.fromEntries(channelActive) };
 }
 
-const claim = db.prepare(`UPDATE generations SET status = 'running', started_at = ?, attempts = attempts + 1
+// Oldest queued job, preferring users with nothing running, so one large
+// order (a wedding album, a batch of assets) doesn't hold up everyone else.
+const claimSql = (fair) => db.prepare(`UPDATE generations SET status = 'running', started_at = ?, attempts = attempts + 1
   WHERE id = (SELECT id FROM generations WHERE status = 'queued' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+    ${fair ? "AND user_id NOT IN (SELECT value FROM json_each(?))" : ""}
     ORDER BY created_at LIMIT 1)
   RETURNING *`);
+const claimFair = claimSql(true);
+const claimAny = claimSql(false);
+
+function claim() {
+  const now = Date.now();
+  const busy = JSON.stringify([...new Set([...running.values()].map((r) => r.userId))]);
+  return claimFair.get(now, now, busy) || claimAny.get(now, now);
+}
+
+// Slots left on the channels, so jobs aren't claimed (and their images
+// prepared) only to wait for a channel. No usable channel: let runJob fail them.
+function channelRoom() {
+  const usable = channels.enabledChannels().filter((c) => c.kind === "mock" || c.apiKey);
+  if (!usable.length || usable.some((c) => !c.options.maxConcurrency)) return Infinity;
+  return usable.reduce((n, c) => n + Math.max(0, c.options.maxConcurrency - (channelActive.get(c.id) || 0)), 0);
+}
 
 function tick() {
   if (stopping) return;
+  sweep();
   const limit = settings.get("generation").workerConcurrency;
-  while (running.size < limit) {
-    const job = claim.get(Date.now(), Date.now());
+  while (running.size < limit && channelRoom() > preparing) {
+    const job = claim();
     if (!job) break;
-    const promise = runJob(job)
+    preparing += 1;
+    const entry = { userId: job.user_id, prepared: false };
+    entry.promise = runJob(job, () => { if (!entry.prepared) { entry.prepared = true; preparing -= 1; } })
       .catch((err) => log.error(`Generation ${job.id} crashed`, err))
-      .finally(() => { running.delete(job.id); kick(); });
-    running.set(job.id, promise);
+      .finally(() => {
+        if (!entry.prepared) { entry.prepared = true; preparing -= 1; }
+        running.delete(job.id);
+        kick();
+      });
+    running.set(job.id, entry);
+  }
+}
+
+// A job marked running that this worker isn't running was orphaned by an error
+// while recording its outcome; put it back in the queue.
+function sweep() {
+  if (Date.now() - lastSweep < 60_000) return;
+  lastSweep = Date.now();
+  const stale = db.prepare("SELECT id FROM generations WHERE status = 'running' AND started_at < ?").all(Date.now() - 60_000);
+  for (const { id } of stale) {
+    if (running.has(id)) continue;
+    db.prepare("UPDATE generations SET status = 'queued', next_attempt_at = NULL WHERE id = ? AND status = 'running'").run(id);
+    log.warn(`Re-queued generation ${id}, which was left running`);
   }
 }
 
@@ -161,16 +202,40 @@ async function saveResults(job, result, channel, size) {
   const dir = path.join(genRoot, month);
   fs.mkdirSync(dir, { recursive: true });
   const images = result.images.slice(0, job.n);
+  try {
+    await writeImages(job, images, month, stored);
+  } catch (err) {
+    removeImages(stored);
+    throw err;
+  }
+  const cost = apiCostUsd({ usage: result.usage, quality: job.quality, size, n: images.length });
+  try {
+    recordResults(job, stored, channel, size, result, cost);
+  } catch (err) {
+    removeImages(stored);
+    throw err;
+  }
+}
+
+async function writeImages(job, images, month, stored) {
   for (let i = 0; i < images.length; i++) {
     const imageId = randomId(14);
     const final = await finalizeImage(images[i], { imageId, generationId: job.id });
-    const rel = `${month}/${job.id}-${i}-${imageId}.${final.format}`;
-    const thumbRel = `${month}/${job.id}-${i}-${imageId}.thumb.webp`;
-    fs.writeFileSync(imageFile(rel), final.buffer);
-    fs.writeFileSync(imageFile(thumbRel), final.thumb);
-    stored.push({ imageId, idx: i, rel, thumbRel, final });
+    const base = `${month}/${job.id}-${i}-${imageId}`;
+    const entry = { imageId, idx: i, rel: `${base}.${final.format}`, thumbRel: `${base}.thumb.webp`, viewRel: `${base}.view.webp`, final };
+    stored.push(entry);
+    fs.writeFileSync(imageFile(entry.rel), final.buffer);
+    fs.writeFileSync(imageFile(entry.thumbRel), final.thumb);
+    if (final.view) fs.writeFileSync(imageFile(entry.viewRel), final.view);
   }
-  const cost = apiCostUsd({ usage: result.usage, quality: job.quality, size, n: images.length });
+}
+
+// Files of a result that couldn't be recorded.
+function removeImages(stored) {
+  for (const s of stored) for (const rel of [s.rel, s.thumbRel, s.viewRel]) fs.rmSync(imageFile(rel), { force: true });
+}
+
+function recordResults(job, stored, channel, size, result, cost) {
   tx(() => {
     const insert = db.prepare(`INSERT INTO generation_images (id, generation_id, user_id, idx, path, thumb_path,
       width, height, bytes, format, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
@@ -200,7 +265,8 @@ async function saveResults(job, result, channel, size) {
 
 // ---------- main
 
-async function runJob(job) {
+// onPrepared: called once the inputs are ready and the job is about to use a channel.
+async function runJob(job, onPrepared = () => {}) {
   const gen = settings.get("generation");
   let inputs;
   try {
@@ -217,6 +283,7 @@ async function runJob(job) {
     return;
   }
   const free = candidates.filter((c) => !c.options.maxConcurrency || (channelActive.get(c.id) || 0) < c.options.maxConcurrency);
+  onPrepared();
   if (!free.length) {
     // Every channel is at its concurrency cap; wait without using up an attempt.
     requeue(job, 3000, { countAttempt: false });
@@ -229,17 +296,13 @@ async function runJob(job) {
   for (const channel of free) {
     const size = sizeForChannel(job.ratio, job.tier, channel.options.sizeMode);
     channelActive.set(channel.id, (channelActive.get(channel.id) || 0) + 1);
+    let result;
     try {
-      const result = await providerFor(channel).run(channel, {
+      result = await providerFor(channel).run(channel, {
         prompt: job.prompt_final, images: inputs, size, quality: job.quality, n: job.n,
         moderation: gen.moderation, outputFormat: "png", outputCompression: gen.outputCompression,
         safetyIdentifier, timeoutSec: gen.requestTimeoutSec
       });
-      const save = job.kind === "asset" ? assetJobs.saveResults : saveResults;
-      await save(job, result, channel, result.size && result.size !== "auto" ? result.size : size);
-      channels.markSuccess(channel.id);
-      log.info(`Generation ${job.id} succeeded on channel #${channel.id} (${result.images.length} image(s))`);
-      return;
     } catch (err) {
       const perr = err instanceof ProviderError ? err
         : new ProviderError("transient", err?.message || String(err), { code: "INTERNAL", publicMessage: PUBLIC_MESSAGES.internal });
@@ -254,9 +317,23 @@ async function runJob(job) {
       }
       channels.markFailure(channel.id, `${perr.code || ""} ${perr.message}`.trim());
       log.warn(`Generation ${job.id} failed on channel #${channel.id} (${perr.kind}): ${perr.message}`);
+      continue;
     } finally {
       channelActive.set(channel.id, Math.max(0, (channelActive.get(channel.id) || 1) - 1));
     }
+    // The channel delivered (and was paid). A failure from here on is ours:
+    // don't blame the channel or ask another one, refund and stop.
+    channels.markSuccess(channel.id);
+    try {
+      const save = job.kind === "asset" ? assetJobs.saveResults : saveResults;
+      await save(job, result, channel, result.size && result.size !== "auto" ? result.size : size);
+    } catch (err) {
+      log.error(`Generation ${job.id}: saving the result from channel #${channel.id} failed`, err);
+      fail(job, { code: "SAVE_FAILED", publicMessage: PUBLIC_MESSAGES.internal, detail: err.stack || err.message });
+      return;
+    }
+    log.info(`Generation ${job.id} succeeded on channel #${channel.id} (${result.images.length} image(s))`);
+    return;
   }
 
   const transient = errors.some((e) => e.kind === "transient");

@@ -1,18 +1,21 @@
 import express from "express";
 import fs from "node:fs";
-import { crc32 } from "node:zlib";
+import zlib from "node:zlib";
 import * as wedding from "../services/wedding.js";
 import * as uploads from "../services/uploads.js";
 import * as worker from "../services/worker.js";
 import { requireUser, uploadSingle } from "../middleware.js";
 import { enforce } from "../lib/rate-limit.js";
 import * as v from "../lib/validate.js";
+import { viewerOf } from "./library.js";
+import { crc32 as crc32js } from "../lib/png-text.js";
+
+// zlib.crc32 is native but needs Node 20.15; the JS one works everywhere.
+const crc32 = zlib.crc32 || crc32js;
 
 // 婚纱影楼 for users: the catalog for the wizard, the couple's photos, buying a
 // package (a shoot) and managing its album.
 export const router = express.Router();
-
-const viewerOf = (req) => ({ loggedIn: !!req.user, userId: req.user?.id ?? null });
 
 router.get("/wedding/catalog", (req, res) => res.json(wedding.catalog(viewerOf(req))));
 
@@ -83,17 +86,27 @@ router.post("/wedding/shoots/:id/photos/:photoId/cancel", requireUser, (req, res
 
 // The whole album as one ZIP. Photos are already compressed, so entries are
 // stored as they are; names are UTF-8.
-router.get("/wedding/shoots/:id/download", requireUser, (req, res) => {
+// One photo at a time, waiting for the client to take each, so a large album
+// neither sits in memory nor holds up other requests.
+router.get("/wedding/shoots/:id/download", requireUser, async (req, res) => {
   const { name, files } = wedding.downloadList(req.user, req.params.id);
   res.attachment(`${name}.zip`).type("application/zip");
   res.set("Cache-Control", "private, no-store");
+  let closed = false;
+  let resume = null;
+  res.on("drain", () => { resume?.(); resume = null; });
+  res.on("close", () => { closed = true; resume?.(); resume = null; });
+  const write = async (chunk) => {
+    if (!res.write(chunk) && !closed) await new Promise((r) => { resume = r; });
+  };
   const central = [];
   let offset = 0;
   const now = new Date();
   const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | Math.floor(now.getSeconds() / 2);
   const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
   for (const entry of files) {
-    const data = fs.readFileSync(entry.file);
+    if (closed) return;
+    const data = await fs.promises.readFile(entry.file);
     const nameBuf = Buffer.from(entry.name, "utf8");
     const crc = crc32(data);
     const local = Buffer.alloc(30);
@@ -101,7 +114,7 @@ router.get("/wedding/shoots/:id/download", requireUser, (req, res) => {
     local.writeUInt16LE(0, 8); local.writeUInt16LE(dosTime, 10); local.writeUInt16LE(dosDate, 12);
     local.writeUInt32LE(crc, 14); local.writeUInt32LE(data.length, 18); local.writeUInt32LE(data.length, 22);
     local.writeUInt16LE(nameBuf.length, 26); local.writeUInt16LE(0, 28);
-    res.write(local); res.write(nameBuf); res.write(data);
+    await write(local); await write(nameBuf); await write(data);
     const head = Buffer.alloc(46);
     head.writeUInt32LE(0x02014b50, 0); head.writeUInt16LE(20, 4); head.writeUInt16LE(20, 6); head.writeUInt16LE(0x0800, 8);
     head.writeUInt16LE(0, 10); head.writeUInt16LE(dosTime, 12); head.writeUInt16LE(dosDate, 14);

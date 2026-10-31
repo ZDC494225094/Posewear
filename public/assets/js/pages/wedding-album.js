@@ -109,7 +109,7 @@ export async function render(ctx) {
   function openViewer(start) {
     const list = ready().filter(visible);
     const index = Math.max(0, list.findIndex((it) => it.id === start.id));
-    lightbox(list.map((it) => ({ src: it.image.url, zoomSrc: it.image.url, alt: it.shot.name, item: it })), index, {
+    lightbox(list.map((it) => ({ src: it.image.view || it.image.url, zoomSrc: it.image.url, alt: it.shot.name, item: it })), index, {
       renderAside: ({ item }, { close }) => h("div.wd-viewer-aside",
         h("span.faint.small", `造型 ${item.look + 1} · ${shoot.looks[item.look]?.scene.name || ""}`),
         h("h3", item.shot.name),
@@ -129,9 +129,18 @@ export async function render(ctx) {
     });
   }
 
+  // Redraw only when something changed, so polling doesn't move keyboard focus.
+  const signature = (s) => JSON.stringify([s.title, s.retakesLeft, s.refunded,
+    s.items.map((it) => [it.status, it.image?.id, it.favorite, it.versions.length])]);
   async function refresh() {
-    try { shoot = (await api.get(`/api/wedding/shoots/${shoot.id}`)).shoot; draw(); } catch { /* keep the last view */ }
+    try {
+      const next = (await api.get(`/api/wedding/shoots/${shoot.id}`)).shoot;
+      const changed = signature(next) !== signature(shoot);
+      shoot = next;
+      if (changed) draw();
+    } catch { /* keep the last view */ }
   }
+  // Every 4 s while the page is in view; much less often in a background tab.
   function poll() {
     clearTimeout(timer);
     if (stopped || !shoot.progress.active) return;
@@ -143,8 +152,10 @@ export async function render(ctx) {
         toast(shoot.progress.failed ? `拍摄完成，有 ${shoot.progress.failed} 张需要处理` : "整套照片都拍好了", { type: shoot.progress.failed ? "info" : "success" });
       }
       poll();
-    }, 4000);
+    }, document.hidden ? 20000 : 4000);
   }
+  const onVisible = () => { if (!document.hidden) poll(); };
+  document.addEventListener("visibilitychange", onVisible);
 
   async function retake(button, item) {
     const free = item.freeRetry || shoot.retakesLeft > 0;
@@ -205,7 +216,7 @@ export async function render(ctx) {
   poll();
   return {
     node: h("div.wrap.wd-album-page", head, progress, toolbar, groups),
-    cleanup() { stopped = true; clearTimeout(timer); }
+    cleanup() { stopped = true; clearTimeout(timer); document.removeEventListener("visibilitychange", onVisible); }
   };
 }
 

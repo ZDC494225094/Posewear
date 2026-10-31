@@ -33,7 +33,7 @@ export async function render() {
   const styles = Object.fromEntries(store.config.generation.styles.map((s) => [s.id, s.label]));
 
   function open(index) {
-    const flat = items.flatMap((g) => g.images.map((img) => ({ src: img.url, alt: "用户作品", g, img })));
+    const flat = items.flatMap((g) => g.images.map((img) => ({ src: img.view || img.url, zoomSrc: img.url, alt: "用户作品", g, img })));
     const start = flat.findIndex((x) => x.g === items[index]);
     lightbox(flat, Math.max(0, start), {
       renderAside: (item, { close }) => h("div.viewer-aside",

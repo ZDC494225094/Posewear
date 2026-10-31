@@ -272,7 +272,7 @@ export function reportDialog(generationId) {
 // Full-size viewer for the owner's work: what it was made from, download,
 // publishing, and sending it back to the studio.
 export function openViewer(gen, start = 0, { onChange } = {}) {
-  const items = gen.images.map((img, i) => ({ src: img.url, alt: `生成结果 ${i + 1}`, img }));
+  const items = gen.images.map((img, i) => ({ src: img.view || img.url, zoomSrc: img.url, alt: `生成结果 ${i + 1}`, img }));
   return lightbox(items, start, {
     renderAside: (item, { close }) => {
       const canPublish = store.config.showcase.enabled && gen.personKind !== "real";

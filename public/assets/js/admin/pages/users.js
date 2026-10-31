@@ -2,7 +2,11 @@ import { h, replace } from "../../core/dom.js";
 import { api } from "../../core/api.js";
 import { toast, toastError, busy, confirmDialog } from "../../core/ui.js";
 import { dateTime, yuan, number, STATUS_TEXT } from "../../core/format.js";
+import { selectMenu } from "../../core/select.js";
 import { pageHead, listView, table, statusPill, drawer, kv, section } from "../kit.js";
+
+const LIBRARY_TEXT = { auto: "跟随充值", unlocked: "手动解锁", locked: "手动锁定" };
+const libraryPill = (u) => (u.libraryUnlocked ? statusPill("素材已解锁", "mat") : statusPill("素材未解锁"));
 
 function openUser(id, onChanged) {
   const body = h("div.stack", h("div.spinner"));
@@ -22,7 +26,8 @@ function openUser(id, onChanged) {
         ["角色", u.role === "admin" ? "管理员" : "用户"], ["点数", h("strong.num", number(u.credits))],
         ["邮箱验证", u.emailVerified ? "已验证" : "未验证"], ["邀请码", u.inviteCode],
         ["邀请人", u.referrer ? u.referrer.email : "—"], ["注册", `${dateTime(u.createdAt)} · ${u.signupIp || ""}`],
-        ["最近登录", `${dateTime(u.lastLoginAt)} · ${u.lastLoginIp || ""}`]
+        ["最近登录", `${dateTime(u.lastLoginAt)} · ${u.lastLoginIp || ""}`],
+        ["素材库", [libraryPill(u), h("span.small.muted", ` ${LIBRARY_TEXT[u.libraryUnlock] || ""}`)]]
       ]),
       section("调整点数", null, h("div.copy-row", delta, reason,
         h("button.btn.btn-primary", { type: "button", onclick: (e) => busy(e.currentTarget, async () => {
@@ -53,6 +58,13 @@ function openUser(id, onChanged) {
         h("div.copy-row", note, h("button.btn", { type: "button", onclick: (e) => busy(e.currentTarget, async () => {
           try { await api.patch(`/api/admin/users/${u.id}`, { note: note.value }); toast("备注已保存", { type: "success" }); } catch (err) { toastError(err); }
         }) }, "保存备注"))),
+      section("素材库浏览", "默认跟随充值：充值后自动解锁全部素材。也可以为这个用户手动解锁或锁定。",
+        selectMenu({ label: "素材库浏览", value: u.libraryUnlock,
+          options: [["auto", "跟随充值"], ["unlocked", "解锁全部素材"], ["locked", "锁定，只能看免费部分"]],
+          onChange: async (value) => {
+            try { await api.patch(`/api/admin/users/${u.id}`, { libraryUnlock: value }); toast("已保存", { type: "success" }); load(); onChanged(); }
+            catch (err) { toastError(err); }
+          } }).node),
       section("点数流水", null, table([
         { label: "时间", render: (r) => dateTime(r.created_at), className: "num" },
         { label: "类型", render: (r) => r.kindLabel },
@@ -77,10 +89,10 @@ function openUser(id, onChanged) {
   load();
 }
 
-export async function render() {
+export async function render(ctx) {
   const view = listView({
     filters: [
-      { key: "q", label: "搜索", placeholder: "邮箱 / 昵称 / ID / 邀请码" },
+      { key: "q", label: "搜索", placeholder: "邮箱 / 昵称 / ID / 邀请码", value: ctx.query.q || "" },
       { key: "status", type: "select", label: "状态", options: [["", "全部状态"], ["active", "正常"], ["banned", "已停用"]] },
       { key: "role", type: "select", label: "角色", options: [["", "全部角色"], ["user", "用户"], ["admin", "管理员"]] }
     ],
@@ -93,6 +105,7 @@ export async function render() {
       { label: "已付", render: (u) => (u.paidCents ? yuan(u.paidCents) : "—"), className: "right num" },
       { label: "生成", render: (u) => u.generations, className: "right num" },
       { label: "状态", render: (u) => [u.status === "banned" ? statusPill("已停用", "pin") : statusPill("正常", "mat"), u.role === "admin" ? statusPill("管理员", "tape") : null] },
+      { label: "素材库", render: libraryPill },
       { label: "注册时间", render: (u) => dateTime(u.createdAt), className: "num" },
       { label: "最近登录", render: (u) => dateTime(u.lastLoginAt), className: "num" }
     ], items, { empty: "没有匹配的用户" })

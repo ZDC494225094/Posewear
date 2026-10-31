@@ -5,10 +5,9 @@ import * as generations from "../services/generations.js";
 import * as billing from "../services/billing.js";
 import { notFound } from "../lib/errors.js";
 import * as v from "../lib/validate.js";
+import { viewerOf } from "./library.js";
 
 export const router = express.Router();
-
-const viewerOf = (req) => ({ loggedIn: !!req.user, userId: req.user?.id ?? null });
 
 router.get("/public/config", (req, res) => {
   const cfg = settings.publicConfig();
@@ -38,10 +37,12 @@ router.get("/public/showcase", (req, res) => {
 // Home page data: real pose + outfit = result examples for the hero, featured
 // and recent works, and packages.
 router.get("/public/home", (req, res) => {
+  const featured = generations.featuredForHome(8);
   res.json({
     combos: generations.homeCombos(viewerOf(req), 6),
-    featured: generations.featuredForHome(8),
-    recent: generations.showcase({ offset: 0, size: 8 }).items,
+    featured,
+    // Recent works only show when nothing is featured.
+    recent: featured.length ? [] : generations.showcase({ offset: 0, size: 8, withTotal: false }).items,
     packages: billing.listPackages().slice(0, 3)
   });
 });

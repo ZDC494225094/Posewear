@@ -42,30 +42,12 @@ app.get("/healthz", (req, res) => {
   res.json({ ok: true, worker: worker.stats() });
 });
 
-// Static assets, served before the session lookup. Fonts and images rarely
-// change; JS and CSS revalidate on every load (cheap 304s) so deploys apply at once.
+// Static assets, served before the session lookup. The HTML shells load code
+// and styles from /assets/<version>/, which changes with every deploy: in
+// production browsers keep those files for a year, so a repeat visit fetches
+// no code at all. Plain /assets paths (images named in code) work as before:
+// fonts and images are cached, JS and CSS revalidate (cheap 304s).
 const assetsDir = path.join(config.publicDir, "assets");
-app.use("/assets", express.static(assetsDir, {
-  index: false,
-  setHeaders(res, file) {
-    if (/\.(woff2|png|jpe?g|webp|svg|ico)$/.test(file)) res.setHeader("Cache-Control", "public, max-age=2592000");
-    else res.setHeader("Cache-Control", "no-cache");
-  }
-}));
-app.use("/assets", (req, res) => res.status(404).end());
-app.get(["/favicon.ico", "/favicon.svg"], (req, res) => res.sendFile(path.join(assetsDir, "img", "favicon.svg")));
-app.get("/robots.txt", (req, res) => res.type("text/plain").send("User-agent: *\nDisallow: /admin\nDisallow: /api\nDisallow: /media/uploads\n"));
-
-// Payment callbacks need their raw bodies and carry no session or CSRF token.
-app.use("/api", notifyRouter);
-app.use(express.json({ limit: "1mb" }));
-app.use(session);
-app.use("/api", csrf);
-app.use("/api", publicRouter, authRouter, meRouter, libraryRouter, studioRouter, assetsRouter, weddingRouter, billingRouter, adminRouter);
-app.use("/api", notFoundApi);
-app.use("/media", mediaRouter);
-
-// HTML shells for the user site and the admin panel, with site metadata filled in.
 const assetVersion = (() => {
   const hash = crypto.createHash("sha1");
   const walk = (dir) => {
@@ -78,6 +60,49 @@ const assetVersion = (() => {
   walk(assetsDir);
   return hash.digest("hex").slice(0, 10);
 })();
+app.use(`/assets/${assetVersion}`, express.static(assetsDir, {
+  index: false,
+  setHeaders(res) { res.setHeader("Cache-Control", config.isProd ? "public, max-age=31536000, immutable" : "no-cache"); }
+}));
+app.use("/assets", express.static(assetsDir, {
+  index: false,
+  setHeaders(res, file) {
+    if (/\.(woff2|png|jpe?g|webp|svg|ico)$/.test(file)) res.setHeader("Cache-Control", "public, max-age=2592000");
+    else res.setHeader("Cache-Control", "no-cache");
+  }
+}));
+app.use("/assets", (req, res) => res.status(404).end());
+app.get(["/favicon.ico", "/favicon.svg"], (req, res) => res.sendFile(path.join(assetsDir, "img", "favicon.svg")));
+app.get("/robots.txt", (req, res) => res.type("text/plain").send("User-agent: *\nDisallow: /admin\nDisallow: /api\nDisallow: /media/uploads\nDisallow: /media/library\n"));
+
+// Payment callbacks need their raw bodies and carry no session or CSRF token.
+app.use("/api", notifyRouter);
+app.use(express.json({ limit: "1mb" }));
+app.use(session);
+app.use("/api", csrf);
+app.use("/api", publicRouter, authRouter, meRouter, libraryRouter, studioRouter, assetsRouter, weddingRouter, billingRouter, adminRouter);
+app.use("/api", notFoundApi);
+app.use("/media", mediaRouter);
+
+// HTML shells for the user site and the admin panel, with site metadata filled in.
+
+// The modules an entry imports statically, as <link rel="modulepreload">, so the
+// browser asks for all of them at once instead of one import level at a time.
+function modulePreloads(entry) {
+  const seen = new Set();
+  const visit = (rel) => {
+    if (seen.has(rel) || !fs.existsSync(path.join(assetsDir, rel))) return;
+    seen.add(rel);
+    const source = fs.readFileSync(path.join(assetsDir, rel), "utf8");
+    for (const m of source.matchAll(/^\s*import\s+(?:[^;]*?\sfrom\s+)?["'](\.{1,2}\/[^"']+)["']/gm)) {
+      visit(path.posix.join(path.posix.dirname(rel), m[1]));
+    }
+  };
+  visit(entry);
+  seen.delete(entry);
+  return [...seen].map((rel) => `<link rel="modulepreload" href="/assets/${assetVersion}/${rel}">`).join("\n  ");
+}
+const preloads = { "index.html": modulePreloads("js/main.js"), "admin.html": modulePreloads("js/admin/main.js") };
 
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[c]);
 const templates = new Map();
@@ -90,7 +115,8 @@ function shell(name) {
     .replaceAll("%SITE_NAME%", escapeHtml(site.name))
     .replaceAll("%SITE_DESCRIPTION%", escapeHtml(site.description))
     .replaceAll("%SITE_KEYWORDS%", escapeHtml(site.keywords))
-    .replaceAll("%ASSET_VERSION%", assetVersion);
+    .replaceAll("%ASSET_VERSION%", assetVersion)
+    .replace("%MODULE_PRELOADS%", preloads[name] || "");
 }
 
 app.use((req, res, next) => {

@@ -1,8 +1,9 @@
-import { h, tile, cicon, replace } from "../core/dom.js";
+import { h, tile, cicon, icon, replace } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { store } from "../core/store.js";
 import { toast, toastError, busy, copyText } from "../core/ui.js";
 import { dateTime, number, yuan } from "../core/format.js";
+import { unlockRule } from "../components/library-browser.js";
 
 function pager(total, page, size, onPage) {
   const pages = Math.max(1, Math.ceil(total / size));
@@ -62,6 +63,9 @@ export async function render(ctx) {
       h("h2", tile("gem", "orange"), "点数余额"),
       h("p.account-balance", h("span.num", number(user.credits)), " 点"),
       h("p.small", "点数长期有效，生成失败自动退回。"),
+      cfg.library.lockEnabled ? h("p.small.account-library", icon("lock", 14), user.libraryUnlocked
+        ? "素材库已全部解锁"
+        : `素材库：每类可浏览前 ${number(cfg.library.freeLimit)} 个，${unlockRule()}`) : null,
       h("div.account-actions", h("a.btn.btn-white", { href: "/pricing" }, cicon("bag", "orange"), "充值"), checkin));
   }
 

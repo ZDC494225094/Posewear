@@ -1,10 +1,11 @@
-import { h, tile, cicon } from "../core/dom.js";
+import { h, tile, cicon, icon } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { store } from "../core/store.js";
 import { toast, toastError, busy } from "../core/ui.js";
 import { number } from "../core/format.js";
 import { navigate } from "../core/nav.js";
 import { priceCard, packagePerks } from "./home.js";
+import { unlockRule } from "../components/library-browser.js";
 
 const PROVIDERS = { alipay: "支付宝", wechat: "微信支付", mock: "模拟支付（测试）" };
 
@@ -41,6 +42,7 @@ export async function render() {
       try {
         const res = await api.post("/api/billing/redeem", { code: codeInput.value });
         store.patchUser({ credits: res.balance });
+        store.refreshUser();
         codeInput.value = "";
         toast(`兑换成功，增加 ${res.credits} 点`, { type: "success" });
       } catch (err) { toastError(err); }
@@ -58,6 +60,8 @@ export async function render() {
   return h("div.pricing.wrap",
     h("header.page-head", h("div", h("h1", "价格"), h("p", "按需购买点数，生成时按画质和清晰度扣除。"),
       store.user ? h("p.balance-line", tile("gem", "orange"), "当前余额 ", h("strong.num", number(store.user.credits)), " 点") : null)),
+    cfg.library.lockEnabled && !store.user?.libraryUnlocked ? h("div.lib-lock-note.pricing-unlock", icon("lock", 16),
+      h("span", `未充值时素材库每类可以浏览前 ${number(cfg.library.freeLimit)} 个。${unlockRule()}，大图、下载和创作都不再受限。`)) : null,
     packages.length
       ? h("div.price-grid", packages.map((pkg) => priceCard(pkg, { perks: packagePerks(pkg, cfg),
         action: h("button.btn.btn-block.btn-primary.btn-lg", { type: "button", onclick: (e) => buy(pkg, e.currentTarget) }, store.user ? "购买" : "登录后购买") })))

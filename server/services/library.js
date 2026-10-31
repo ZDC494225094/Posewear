@@ -1,12 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import sharp from "sharp";
 import { db, tx } from "../db.js";
 import { config } from "../config.js";
 import * as settings from "./settings.js";
 import * as taxonomy from "./taxonomy.js";
 import { badRequest, forbidden, notFound } from "../lib/errors.js";
-import { randomId } from "../lib/crypto.js";
+import { randomId, sha256, safeEqual } from "../lib/crypto.js";
 
 export const RATINGS = ["general", "suggestive", "explicit"];
 export const RATING_LABELS = { general: "普通", suggestive: "敏感", explicit: "限制" };
@@ -121,7 +122,105 @@ export function usableForAI(asset, { withPerson = false } = {}) {
 // Credits a user pays to use an asset: shared assets carry the owner's price.
 export const feeFor = (asset, userId) => (asset?.owner_id && asset.owner_id !== userId ? asset.price : 0);
 
-export function dto(row) {
+// ---------- access: the free share, unlocking, and image links
+
+// Whether a user sees the whole library: admins always, then an admin's choice
+// for this user, otherwise any recharge (paid orders of at least unlockMinYuan
+// in total, and redeem codes when they count).
+export function unlocked(user) {
+  if (!user) return false;
+  if (user.role === "admin" || user.library_unlock === 1) return true;
+  if (user.library_unlock === 0) return false;
+  const cfg = settings.get("library");
+  const cents = db.prepare("SELECT COALESCE(SUM(amount_cents), 0) AS n FROM orders WHERE user_id = ? AND status = 'paid'")
+    .get(user.id).n;
+  if (cents > 0 && cents >= cfg.unlockMinYuan * 100) return true;
+  return cfg.unlockByRedeem && !!db.prepare("SELECT 1 FROM redeem_codes WHERE used_by = ? LIMIT 1").get(user.id);
+}
+
+// What image links are bound to: the user, or for a guest a hash of their CSRF
+// cookie. Browsers send neither with images embedded on other sites.
+export const viewerKey = (user, guestCookie = "") =>
+  (user ? `u${user.id}` : guestCookie ? `g${sha256(String(guestCookie)).slice(0, 20)}` : "");
+
+// Who is browsing. `unlocked` lifts the free limit. The 婚纱影楼 pages add
+// `service`: a paid service shows its own assets in full, to guests too.
+export function viewerFor(user, guestCookie = "") {
+  return {
+    loggedIn: !!user, userId: user?.id ?? null, admin: user?.role === "admin",
+    unlocked: !settings.get("library").lockEnabled || unlocked(user),
+    key: viewerKey(user, guestCookie)
+  };
+}
+
+// The free share: the first freeLimit assets of each type in library order
+// (whole pose groups for poses), counted among what any signed-in user sees.
+// Admins choose what is free by the order of the library.
+function freeIds() {
+  const i = idx();
+  if (i.free) return i.free;
+  const limit = settings.get("library").freeLimit;
+  const anyone = { loggedIn: true, userId: null };
+  const free = new Set();
+  for (const type of FLAT_TYPES) {
+    let n = 0;
+    for (const row of i.byType[type]) {
+      if (n >= limit) break;
+      if (visible(row, anyone)) { free.add(row.id); n += 1; }
+    }
+  }
+  let n = 0;
+  for (const rows of i.groups.values()) {
+    if (n >= limit) break;
+    const shown = rows.filter((r) => visible(r, anyone));
+    if (!shown.length) continue;
+    for (const r of shown) free.add(r.id);
+    n += 1;
+  }
+  i.free = free;
+  return free;
+}
+
+// Whether a viewer may see an asset's images and create with it.
+export function accessible(asset, viewer = {}) {
+  if (!asset) return false;
+  if (viewer.unlocked || viewer.admin) return true;
+  if (asset.owner_id && asset.owner_id === viewer.userId) return true;
+  return freeIds().has(asset.id);
+}
+
+const LINK_HOUR = 3600_000;
+const signLink = (payload) => crypto.createHmac("sha256", `library-link:${config.appSecret}`).update(payload)
+  .digest("base64url").slice(0, 22);
+
+// Image link that expires in one to two hours. The expiry is rounded to the
+// hour, so a page keeps the same links for a while and browsers can cache the
+// images. A bound link only works for the viewer it was made for; an unbound
+// one (thumbnails of what a work was made from) works for anyone until it expires.
+export function mediaLink(row, variant, key = "") {
+  const exp = (Math.floor(Date.now() / LINK_HOUR) + 2) * LINK_HOUR;
+  const token = `${exp.toString(36)}.${key ? 1 : 0}.${signLink(`${row.id}|${variant}|${exp}|${key || "*"}`)}`;
+  return `/media/library/${encodeURIComponent(row.id)}/${variant}?t=${token}`;
+}
+
+// null when the link is invalid or expired, else whether it was bound.
+export function checkLink(id, variant, token, key) {
+  const [exp36, bound, sig] = String(token || "").split(".");
+  const exp = parseInt(exp36, 36);
+  if (!sig || !Number.isFinite(exp) || exp < Date.now() || exp > Date.now() + 3 * LINK_HOUR) return null;
+  if (bound !== "1" && variant === "original") return null;
+  if (bound === "1" && !key) return null;
+  return safeEqual(sig, signLink(`${id}|${variant}|${exp}|${bound === "1" ? key : "*"}`)) ? { bound: bound === "1" } : null;
+}
+
+const plainLink = (row, variant) => `/media/library/${encodeURIComponent(row.id)}/${variant}`;
+
+function canDownload(viewer) {
+  const policy = settings.get("library").originalDownload;
+  return policy === "public" || (policy === "login" && viewer.loggedIn);
+}
+
+function fields(row) {
   return {
     id: row.id,
     type: row.type,
@@ -138,12 +237,36 @@ export function dto(row) {
     origin: row.owner_id ? "user" : "platform",
     generated: row.source === "ai",
     owner: row.owner_id ? { id: row.owner_id, name: row.owner_name || "用户" } : null,
-    price: row.owner_id ? row.price : 0,
+    price: row.owner_id ? row.price : 0
+  };
+}
+
+// An asset as a viewer sees it: image links signed for them, or, outside their
+// free share, labels and a blurred placeholder only. Guests get thumbnails but
+// no large previews. Without a viewer (owner and admin pages) the links are
+// plain; the media route lets owners and admins through.
+export function dto(row, viewer = null) {
+  if (viewer && !accessible(row, viewer)) {
+    const { keywords, ...rest } = fields(row);
+    return { ...rest, locked: true, ai: false, aiWithPerson: false, blur: plainLink(row, "blur"), thumb: null, preview: null, original: null };
+  }
+  const link = (variant) => (viewer ? mediaLink(row, variant, viewer.key) : plainLink(row, variant));
+  return {
+    ...fields(row),
     ai: usableForAI(row),
     aiWithPerson: usableForAI(row, { withPerson: true }),
-    thumb: `/media/library/${encodeURIComponent(row.id)}/thumb`,
-    preview: `/media/library/${encodeURIComponent(row.id)}/preview`
+    thumb: link("thumb"),
+    preview: !viewer || viewer.loggedIn || viewer.service ? link("preview") : null,
+    original: !viewer || canDownload(viewer) ? link("original") : null
   };
+}
+
+// An asset shown as part of a work or a home page example: unbound links, so
+// the free limit doesn't hide what a work was made from (creating with it
+// still needs access).
+export function displayDto(row) {
+  return { ...fields(row), ai: usableForAI(row), aiWithPerson: usableForAI(row, { withPerson: true }),
+    thumb: mediaLink(row, "thumb"), preview: mediaLink(row, "preview") };
 }
 
 // What the owner (and admins) see on top of the public fields.
@@ -164,7 +287,7 @@ export function getAsset(id) {
 // Every visible angle of the pose an asset belongs to.
 export function angles(asset, viewer) {
   if (asset.type !== "pose") return [];
-  return (idx().groups.get(asset.group_key) || []).filter((r) => visible(r, viewer)).map(dto);
+  return (idx().groups.get(asset.group_key) || []).filter((r) => visible(r, viewer)).map((r) => dto(r, viewer));
 }
 
 // Angle keys a pose group already has, visible or not.
@@ -193,30 +316,35 @@ export function queryPoses(filters, viewer, { offset = 0, limit = 48 } = {}) {
   const groups = idx().groups;
   if (filters.view === "image") {
     const items = poses.filter((r) => visible(r, viewer) && matches(r, f, viewer));
-    return { total: items.length, items: items.slice(offset, offset + limit).map(dto) };
+    return { total: items.length, locked: lockedCount(items, viewer), items: items.slice(offset, offset + limit).map((r) => dto(r, viewer)) };
   }
   // Group view: one card per pose with every visible angle, matching any angle.
   const keys = [];
+  const firsts = [];
   const seen = new Set();
   for (const row of poses) {
     if (seen.has(row.group_key) || !visible(row, viewer) || !matches(row, f, viewer)) continue;
     seen.add(row.group_key);
     keys.push(row.group_key);
+    firsts.push(row);
   }
   const items = keys.slice(offset, offset + limit).map((key) => {
     const images = groups.get(key).filter((r) => visible(r, viewer));
     const cover = images.find((r) => filters.angle && r.angle === filters.angle) || images[0];
-    return { key, cover: dto(cover), images: images.map(dto) };
+    return { key, locked: !accessible(cover, viewer), cover: dto(cover, viewer), images: images.map((r) => dto(r, viewer)) };
   });
-  return { total: keys.length, items };
+  return { total: keys.length, locked: lockedCount(firsts, viewer), items };
 }
+
+// How many of the matches the viewer can only see locked.
+const lockedCount = (rows, viewer) => (viewer?.unlocked || viewer?.admin ? 0 : rows.filter((r) => !accessible(r, viewer)).length);
 
 // Outfits, scenes and items: one card per asset.
 export function queryFlat(type, filters, viewer, { offset = 0, limit = 48 } = {}) {
   const q = String(filters.q || "").trim().toLowerCase();
   const f = { series: filters.series, category: filters.category, origin: filters.origin, license: filters.license, q };
   const items = idx().byType[type].filter((r) => visible(r, viewer) && matches(r, f, viewer));
-  return { total: items.length, items: items.slice(offset, offset + limit).map(dto) };
+  return { total: items.length, locked: lockedCount(items, viewer), items: items.slice(offset, offset + limit).map((r) => dto(r, viewer)) };
 }
 
 // Sort facets by the category tree; keys not in the tree keep catalog order after it.
@@ -255,6 +383,7 @@ function flatMeta(type, viewer) {
 }
 
 export function meta(viewer = {}) {
+  const lib = settings.get("library");
   const poses = idx().byType.pose;
   const groups = idx().groups;
   const seriesMap = new Map(), categoryMap = new Map(), angleMap = new Map();
@@ -292,7 +421,8 @@ export function meta(viewer = {}) {
       origins: sizes(origins)
     },
     ...Object.fromEntries(FLAT_TYPES.map((type) => [type, flatMeta(type, viewer)])),
-    totalGroups: groups.size
+    totalGroups: groups.size,
+    access: { unlocked: !!(viewer.unlocked || viewer.admin), lockEnabled: lib.lockEnabled, freeLimit: lib.freeLimit }
   };
 }
 
@@ -301,13 +431,13 @@ export function meta(viewer = {}) {
 // Only platform assets (and the viewer's own), so a random pick never costs a fee.
 export function random({ type, series, category, includeDuo = false, forAI = false, withPerson = false,
   exclude = "" }, viewer = {}) {
-  const ok = (r) => visible(r, viewer) && (!forAI || usableForAI(r, { withPerson })) &&
+  const ok = (r) => visible(r, viewer) && accessible(r, viewer) && (!forAI || usableForAI(r, { withPerson })) &&
     (!r.owner_id || r.owner_id === viewer.userId);
   if (FLAT_TYPES.includes(type)) {
     const candidates = idx().byType[type].filter((r) => ok(r) && (!series || r.series === series) && (!category || r.category === category));
     const alternatives = candidates.filter((r) => r.id !== exclude);
     const from = alternatives.length ? alternatives : candidates;
-    return from.length ? dto(from[Math.floor(Math.random() * from.length)]) : null;
+    return from.length ? dto(from[Math.floor(Math.random() * from.length)], viewer) : null;
   }
   const candidates = [];
   for (const [key, images] of idx().groups) {
@@ -323,7 +453,7 @@ export function random({ type, series, category, includeDuo = false, forAI = fal
   const from = alternatives.length ? alternatives : candidates;
   if (!from.length) return null;
   const group = from[Math.floor(Math.random() * from.length)];
-  return dto(group.usable[Math.floor(Math.random() * group.usable.length)]);
+  return dto(group.usable[Math.floor(Math.random() * group.usable.length)], viewer);
 }
 
 // ---------- files

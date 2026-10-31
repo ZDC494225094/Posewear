@@ -6,7 +6,8 @@
 //   then set a channel's Base URL to http://127.0.0.1:8787/v1 with any API key.
 //
 // Put "[fake:moderation]", "[fake:503]", "[fake:quota]" or "[fake:param]" in a
-// prompt to simulate the corresponding upstream error.
+// prompt to simulate the corresponding upstream error, or "[fake:slow]" for a
+// response that takes 1.5 s.
 import http from "node:http";
 import { pathToFileURL } from "node:url";
 import sharp from "sharp";
@@ -72,6 +73,7 @@ export function createFakeOpenAI({ log = false } = {}) {
     if (log) console.log(record);
 
     const prompt = String(fields.prompt || "");
+    if (prompt.includes("[fake:slow]")) await new Promise((r) => setTimeout(r, 1500));
     if (prompt.includes("[fake:moderation]")) {
       return json(res, 400, { error: { message: "Your request was rejected by the safety system.", type: "image_generation_user_error",
         code: "moderation_blocked", moderation_details: { moderation_stage: "input", categories: ["sexual"] } } });

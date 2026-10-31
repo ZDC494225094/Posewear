@@ -76,7 +76,11 @@ export async function finalizeImage(buffer, { imageId, generationId }) {
   }
   const thumb = await sharp(out).resize({ width: 640, height: 640, fit: "inside", withoutEnlargement: true })
     .webp({ quality: 80 }).toBuffer();
-  return { buffer: out, thumb, width: meta.width, height: meta.height, format: format === "jpeg" ? "jpg" : format };
+  // For viewing: a fraction of the size of the PNG original, which stays for zoom and download.
+  let viewPipeline = sharp(out).resize({ width: 2048, height: 2048, fit: "inside", withoutEnlargement: true }).webp({ quality: 82 });
+  if (label) viewPipeline = viewPipeline.withXmp(xmpPacket(label));
+  const view = await viewPipeline.toBuffer();
+  return { buffer: out, thumb, view, width: meta.width, height: meta.height, format: format === "jpeg" ? "jpg" : format };
 }
 
 // Admin preview of the watermark, to confirm the server has a CJK font.
@@ -86,4 +90,24 @@ export async function watermarkPreview() {
   const svg = watermarkSvg(width, height, { ...safety.watermark, opacity: Math.max(0.6, safety.watermark.opacity) });
   return sharp({ create: { width, height, channels: 3, background: { r: 196, g: 210, b: 202 } } })
     .composite([{ input: svg, left: 0, top: 0 }]).png().toBuffer();
+}
+
+// Faint repeated mark over library previews shown to users: copied previews
+// stay recognisable, and the user id in it says whose account they came from.
+export async function markPreview(file, text) {
+  const image = sharp(file);
+  const { width, height } = await image.metadata();
+  const size = Math.max(12, Math.round(Math.min(width, height) * 0.022));
+  const textWidth = [...text].reduce((w, ch) => w + (/[⺀-￿]/.test(ch) ? size : size * 0.62), 0);
+  // Sparse, so the mark doesn't get in the way of reading a pose or a garment.
+  const tileW = Math.round(textWidth + size * 12);
+  const tileH = Math.round(size * 14);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+    <defs><pattern id="m" width="${tileW}" height="${tileH}" patternUnits="userSpaceOnUse" patternTransform="rotate(-24)">
+      <text x="0" y="${size * 2}" font-family="${FONT_STACK}" font-size="${size}" font-weight="600" fill="#808080" fill-opacity="0.11">${escapeXml(text)}</text>
+      <text x="${Math.round(tileW / 2)}" y="${size * 9}" font-family="${FONT_STACK}" font-size="${size}" font-weight="600" fill="#808080" fill-opacity="0.11">${escapeXml(text)}</text>
+    </pattern></defs>
+    <rect width="100%" height="100%" fill="url(#m)"/>
+  </svg>`;
+  return image.composite([{ input: Buffer.from(svg), left: 0, top: 0 }]).webp({ quality: 86 }).toBuffer();
 }

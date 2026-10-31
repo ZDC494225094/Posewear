@@ -70,6 +70,28 @@ export async function render(ctx) {
     if (q.sceneId) { state.sceneAsset = await fetchAsset(q.sceneId); state.scene = ""; }
     if (q.items) state.items = await Promise.all(q.items.split(",").filter(Boolean).slice(0, maxItems).map(fetchAsset));
   } catch { toast("链接中的部分素材已下架", { type: "error" }); }
+  // Image links expire after an hour or two, so renew what the draft kept, and
+  // take off anything that is gone or outside what this account has unlocked.
+  const kept = [state.pose, state.outfit, state.sceneAsset, ...state.items].filter((a) => a?.id);
+  if (kept.length) {
+    try {
+      const { items } = await api.get("/api/library/assets", { ids: kept.map((a) => a.id).join(",") });
+      const fresh = new Map(items.filter(Boolean).map((a) => [a.id, a]));
+      let locked = 0, gone = 0;
+      const renew = (a) => {
+        if (!a?.id) return a;
+        const next = fresh.get(a.id);
+        if (!next) gone += 1; else if (next.locked) locked += 1;
+        return next && !next.locked ? next : null;
+      };
+      state.pose = renew(state.pose);
+      state.outfit = renew(state.outfit);
+      state.sceneAsset = renew(state.sceneAsset);
+      state.items = state.items.map(renew).filter(Boolean);
+      if (locked) toast(`有 ${locked} 个素材需要充值解锁，已从创作台移除`, { type: "error" });
+      else if (gone) toast(`有 ${gone} 个素材已下架，已从创作台移除`, { type: "error" });
+    } catch { /* keep the saved links */ }
+  }
   if (q.style && cfg.styles.some((s) => s.id === q.style)) state.style = q.style;
   if (q.camera && (cfg.cameras || []).some((c) => c.id === q.camera)) state.camera = q.camera;
   if (q.sceneId || q.items) moreRefs = true;
@@ -133,7 +155,7 @@ export async function render(ctx) {
     replace(refsEl,
       ref({
         key: "pose", title: "姿势", iconName: "pose", color: "purple", filled: !!state.pose,
-        image: state.pose?.preview, code: state.pose?.code, note: poseNote, fee: assetFee(state.pose), emptyText: "选择姿势",
+        image: state.pose?.thumb || state.pose?.preview, code: state.pose?.code, note: poseNote, fee: assetFee(state.pose), emptyText: "选择姿势",
         onPick: () => openPicker("pose"),
         tools: [
           toolButton("shuffle", "purple", "随机姿势", (e) => busy(e.currentTarget, () => randomize("pose"))),
@@ -142,7 +164,7 @@ export async function render(ctx) {
       }),
       ref({
         key: "outfit", title: "服装", iconName: "shirt", color: "pink", filled: !!(state.outfit || state.outfitUpload),
-        image: state.outfit?.preview || state.outfitUpload?.url, code: state.outfit?.code || state.outfit?.id || (state.outfitUpload ? "上传" : ""),
+        image: state.outfit?.thumb || state.outfit?.preview || state.outfitUpload?.thumb || state.outfitUpload?.url, code: state.outfit?.code || state.outfit?.id || (state.outfitUpload ? "上传" : ""),
         note: noteFor(state.outfit), fee: assetFee(state.outfit), emptyText: "选择服装", onPick: () => openPicker("outfit"),
         tools: [
           toolButton("shuffle", "purple", "随机服装", (e) => busy(e.currentTarget, () => randomize("outfit"))),

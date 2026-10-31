@@ -573,7 +573,27 @@ const migrations = [
     for (const tree of WEDDING_OUTFIT_TREES) addMajor(conn, "outfit", tree);
     addMajor(conn, "scene", WEDDING_PLATE_TREE);
     seedWeddingScenes(conn);
-  }
+  },
+  // 6: the free share of the library and anti-scraping. library_unlock is an
+  // admin's choice for one user (1 unlocked, 0 locked); NULL leaves it to their
+  // recharges. Alerts record who tripped the image and listing limits. Plus an
+  // index for the showcase order (featured first, then newest).
+  `
+  ALTER TABLE users ADD COLUMN library_unlock INTEGER;
+  CREATE INDEX idx_redeem_used_by ON redeem_codes(used_by);
+  CREATE TABLE access_alerts (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    ip TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL,
+    hits INTEGER NOT NULL DEFAULT 1,
+    first_at INTEGER NOT NULL,
+    last_at INTEGER NOT NULL
+  );
+  CREATE INDEX idx_access_alerts_last ON access_alerts(last_at DESC);
+  CREATE INDEX idx_access_alerts_who ON access_alerts(user_id, ip, kind, last_at);
+  CREATE INDEX idx_gen_showcase ON generations(is_public, hidden, featured DESC, published_at DESC);
+  `
 ];
 
 export function migrate() {

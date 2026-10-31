@@ -7,8 +7,16 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 // .env is optional; real environment variables always win.
 const envFile = path.join(ROOT, process.env.ENV_FILE || ".env");
-if (fs.existsSync(envFile) && typeof process.loadEnvFile === "function") {
-  process.loadEnvFile(envFile);
+if (fs.existsSync(envFile)) {
+  if (typeof process.loadEnvFile === "function") process.loadEnvFile(envFile);
+  else {
+    // Node before 20.12 has no loadEnvFile: plain KEY=value lines, optionally quoted.
+    for (const line of fs.readFileSync(envFile, "utf8").split(/\r?\n/)) {
+      const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
+      if (!m || line.trimStart().startsWith("#") || process.env[m[1]] !== undefined) continue;
+      process.env[m[1]] = m[2].replace(/^(["'])(.*)\1$/, "$2");
+    }
+  }
 }
 
 const env = process.env;
