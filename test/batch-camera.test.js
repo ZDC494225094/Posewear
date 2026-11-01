@@ -92,6 +92,24 @@ test("a batch with identical rows, too many rows or a closed category charges no
   assert.equal(await balance(user), before);
 });
 
+test("users always pay for asset generation and can't reach the free platform route", async () => {
+  const police = minorOf("outfit", "professional", "police");
+  const before = await balance(user);
+  const blocked = await user.post("/api/admin/asset-jobs/batch", { type: "outfit", items: [{ categoryId: police.id }] });
+  assert.equal(blocked.status, 403);
+  const single = await user.post("/api/admin/asset-jobs", { type: "outfit", categoryId: police.id });
+  assert.equal(single.status, 403);
+  assert.equal(await balance(user), before);
+  // Flags meant for platform assets are ignored on the user route.
+  const res = await user.post("/api/my/asset-jobs/batch", { type: "outfit", platform: true, admin: true, license: "commercial",
+    items: [{ categoryId: police.id, gender: "male", description: "交警" }] });
+  assert.equal(res.status, 201, JSON.stringify(res.data));
+  assert.ok(res.data.items.every((j) => j.cost === 6 && !j.platform));
+  assert.equal(await balance(user), before - 6);
+  const [job] = await waitJobs(user, "/api/my", res.data.items.map((j) => j.id));
+  assert.equal(job.assets[0].origin, "user");
+});
+
 test("admin batches make free platform poses, and male poses ask for a male mannequin", async () => {
   const standing = minorOf("pose", "全身1人・標準系", "立ち");
   const sitting = minorOf("pose", "全身1人・標準系", "座り");

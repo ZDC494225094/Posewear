@@ -35,3 +35,24 @@ export function validSize(size) {
   return w % 16 === 0 && h % 16 === 0 && Math.max(w, h) <= 3840 && px >= 655_360 && px <= 8_294_400 &&
     Math.max(w / h, h / w) <= 3;
 }
+
+// 超分 (redrawing a finished image larger): 2K is the "hd" pixel budget, 4K the
+// "uhd" one, and the output keeps the source image's own aspect ratio. A source
+// in one of the standard ratios gets that ratio's size from the table. null
+// when the result wouldn't be clearly larger than the source.
+const UPSCALE_PIXELS = { hd: 2560 * 1440, uhd: 3840 * 2160 };
+
+export function upscaleSize(width, height, target) {
+  if (!UPSCALE_PIXELS[target] || !(width > 0 && height > 0)) return null;
+  const aspect = width / height;
+  const listed = Object.values(SIZE_TABLE).map((sizes) => sizes[target]).find(([w, h]) => Math.abs(w / h - aspect) / aspect < 0.01);
+  let w, h;
+  if (listed) [w, h] = listed;
+  else {
+    const scale = Math.min(3840 / Math.max(width, height), Math.sqrt(UPSCALE_PIXELS[target] / (width * height)));
+    w = Math.floor((width * scale) / 16) * 16;
+    h = Math.floor((height * scale) / 16) * 16;
+  }
+  if (w * h < width * height * 1.2 || !validSize(`${w}x${h}`)) return null;
+  return `${w}x${h}`;
+}

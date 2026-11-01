@@ -593,6 +593,11 @@ const migrations = [
   CREATE INDEX idx_access_alerts_last ON access_alerts(last_at DESC);
   CREATE INDEX idx_access_alerts_who ON access_alerts(user_id, ip, kind, last_at);
   CREATE INDEX idx_gen_showcase ON generations(is_public, hidden, featured DESC, published_at DESC);
+  `,
+  // 7: upscaled works. upscale_of is the image (generation_images.id) a work
+  // redraws at a higher resolution.
+  `
+  ALTER TABLE generations ADD COLUMN upscale_of TEXT;
   `
 ];
 

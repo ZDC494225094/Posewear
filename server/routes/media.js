@@ -5,7 +5,7 @@ import { db } from "../db.js";
 import * as library from "../services/library.js";
 import * as settings from "../services/settings.js";
 import { uploadFile } from "../services/uploads.js";
-import { imageFile } from "../services/generations.js";
+import { imageFile, viewRel } from "../services/generations.js";
 import * as wedding from "../services/wedding.js";
 import * as guard from "../services/access-guard.js";
 import { markPreview } from "../services/image-post.js";
@@ -113,7 +113,7 @@ router.get("/wedding/sample/:imageId/:variant", (req, res) => {
 // get one on first view.
 const viewing = new Map();
 async function viewFile(row) {
-  const file = imageFile(row.path.replace(/.[a-z]+$/, ".view.webp"));
+  const file = imageFile(viewRel(row.path));
   if (fs.existsSync(file)) return file;
   const full = imageFile(row.path);
   if (!fs.existsSync(full)) return null;

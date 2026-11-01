@@ -401,6 +401,11 @@ img.asset-blur, .asset-card img { -webkit-user-drag: none; }
 .viewer-actions { display: grid; gap: 8px; margin-top: 8px; }
 .viewer-sec { display: grid; gap: 8px; }
 .viewer-sec-title { font-size: 13px; font-weight: 600; }
+.upscale-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.upscale-btn { display: grid; grid-template-columns: 1fr auto; align-items: baseline; justify-items: start; gap: 4px 8px; min-height: 58px; padding: 10px 14px; border-radius: 14px; text-align: left; line-height: 1.2; }
+.upscale-name { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+.upscale-cost { justify-self: end; font-size: 13px; font-weight: 600; color: var(--label-2); }
+.upscale-size { grid-column: 1 / -1; font-size: 12px; color: var(--label-3); }
 .ref-block { display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 10px; }
 .ref-block-item { display: grid; align-content: start; gap: 5px; margin: 0; min-width: 0; font-size: 12px; color: var(--label-2); }
 .ref-block-item img, .ref-block-empty { display: grid; place-items: center; width: 100%; aspect-ratio: 3 / 4; object-fit: contain; border-radius: 10px; background: var(--fill-2); }

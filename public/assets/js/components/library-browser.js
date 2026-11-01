@@ -89,6 +89,13 @@ export function libraryBrowser({ type = "pose", mode = "page", withPerson = fals
   const node = h("div.lib-browser", { class: `mode-${mode}` }, filterBar, sheet, lockNote, summary, grid, h("div.lib-more-wrap", more));
 
   let searchTimer = null;
+  const searchInput = h("input.input", { type: "search",
+    oninput: (e) => {
+      clearTimeout(searchTimer);
+      const q = e.target.value;
+      searchTimer = setTimeout(() => setFilter({ q }, { reload: true }), 280);
+    } });
+  const search = h("label.lib-search", icon("search", 17), h("span.sr-only", "搜索"), searchInput);
   function setFilter(patch, { reload = true } = {}) {
     Object.assign(state.filters, patch);
     onFiltersChange?.({ type: state.type, ...state.filters });
@@ -129,15 +136,12 @@ export function libraryBrowser({ type = "pose", mode = "page", withPerson = fals
   function renderFilters() {
     if (!meta) return;
     const f = state.filters;
-    const search = h("label.lib-search",
-      icon("search", 17),
-      h("span.sr-only", "搜索"),
-      h("input.input", { type: "search", value: f.q, placeholder: SEARCH_HINT[state.type],
-        oninput: (e) => {
-          clearTimeout(searchTimer);
-          const q = e.target.value;
-          searchTimer = setTimeout(() => setFilter({ q }, { reload: true }), 280);
-        } }));
+    // The search box is built once and reused, so re-rendering the filters
+    // (which happens as the query changes) never takes focus away from it.
+    searchInput.placeholder = SEARCH_HINT[state.type];
+    const typing = document.activeElement === searchInput;
+    const caret = typing ? [searchInput.selectionStart, searchInput.selectionEnd] : null;
+    if (!typing) searchInput.value = f.q || "";
     const m = meta[state.type];
     const cats = m.categories.filter((c) => !f.series || c.series === f.series);
     const categoryOptions = cats.map((c) => ({ value: c.key, text: label(c), note: number(c.count) }));
@@ -170,6 +174,7 @@ export function libraryBrowser({ type = "pose", mode = "page", withPerson = fals
           originSelect(m.origins),
           licenseSelect(m.origins)));
     }
+    if (typing) { searchInput.focus({ preventScroll: true }); searchInput.setSelectionRange(...caret); }
   }
 
   function badges(asset) {

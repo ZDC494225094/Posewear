@@ -37,7 +37,6 @@ const cartesian = (lists) => lists.reduce((acc, list) => acc.flatMap((a) => list
 
 export async function render(ctx) {
   const cfg = store.config.assets;
-  const admin = store.user?.role === "admin";
   let tree;
   try { tree = await taxonomy(); } catch (err) { toastError(err); tree = null; }
 
@@ -49,11 +48,11 @@ export async function render(ctx) {
     angle: "正面",
     note: "",
     custom: new Map(),   // minor id -> [detail, ...]
-    removed: new Set(),  // keys of generated rows the user took out
-    platform: admin,
-    publish: true
+    removed: new Set()   // keys of generated rows the user took out
   };
-  const max = admin ? 60 : 20;
+  // Everyone, admins included, generates here at the user price; platform
+  // assets are made in the admin panel.
+  const max = 20;
 
   const panel = h("div.panel-scroll");
   const actionEl = h("div.studio-action.stack");
@@ -188,21 +187,16 @@ export async function render(ctx) {
         h("input.input.input-filled", { value: state.note, maxLength: 120, placeholder: "所有素材都会带上，比如：配色以藏青和白色为主",
           oninput: (e) => { state.note = e.target.value; } })),
       h("section.panel-sec", sectionHead("list", "indigo", "将要生成", h("span.aside.num", `${batch.length} 个素材`)),
-        previewList(batch)),
-      admin ? h("section.panel-sec.batch-admin",
-        h("label.switch", h("input", { type: "checkbox", checked: state.platform, onchange: (e) => { state.platform = e.target.checked; update(); } }),
-          h("span.switch-ui", { "aria-hidden": "true" }), h("span.switch-text", "生成为平台素材（免费，可商用）")),
-        state.platform ? h("label.switch", h("input", { type: "checkbox", checked: state.publish, onchange: (e) => { state.publish = e.target.checked; } }),
-          h("span.switch-ui", { "aria-hidden": "true" }), h("span.switch-text", "生成后直接上架")) : null) : null);
+        previewList(batch)));
     renderAction(batch);
   }
 
   function renderAction(batch) {
     const user = store.user;
-    const unit = admin && state.platform ? 0 : cfg[`${state.type}Credits`] ?? 0;
+    const unit = cfg[`${state.type}Credits`] ?? 0;
     const total = unit * batch.length;
     let button, reason = "";
-    if (!admin && !cfg.generation) reason = "素材生成暂未开放";
+    if (!cfg.generation) reason = "素材生成暂未开放";
     else if (!batch.length) reason = "勾选小类后才能开始";
     else if (batch.length > max) reason = `一次最多生成 ${max} 个，请减少小类或细分`;
     if (!user) {
@@ -216,18 +210,20 @@ export async function render(ctx) {
     }
     replace(actionEl, button,
       reason ? h("p.action-reason", { role: "status" }, reason)
-        : h("p.action-balance", unit ? `每个 ${unit} 点 · 余额 ${number(user?.credits ?? 0)} 点 · 失败自动退回` : "平台素材免费生成"));
+        : h("p.action-balance", unit ? `每个 ${unit} 点 · 余额 ${number(user?.credits ?? 0)} 点 · 失败自动退回` : ""),
+      h("p.small.faint", "生成的素材默认只有你能用。在", h("a.link", { href: "/my-assets" }, "我的素材"),
+        `里公开并定价后，别人每次用它创作都要付这些点数，你获得 ${cfg.rebatePercent}% 分成。`));
   }
 
   async function start(batch) {
     const description = (row) => [state.note.trim(), row.detail].filter(Boolean).join("，");
     const body = {
-      type: state.type, publish: state.publish,
+      type: state.type,
       items: batch.map((row) => ({ categoryId: row.minor.id, gender: row.gender || undefined, season: row.season || undefined,
         time: row.time || undefined, angle: state.type === "pose" ? state.angle : undefined, description: description(row) }))
     };
     try {
-      const { items } = await api.post(admin && state.platform ? "/api/admin/asset-jobs/batch" : "/api/my/asset-jobs/batch", body);
+      const { items } = await api.post("/api/my/asset-jobs/batch", body);
       jobs.add(items);
       store.refreshUser();
       toast(`已开始生成 ${items.length} 个素材，完成后出现在右侧`, { type: "success" });

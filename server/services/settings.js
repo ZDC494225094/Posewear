@@ -89,6 +89,8 @@ export const DEFAULTS = {
       { id: "flash", label: "直闪", prompt: "on-camera direct flash, hard shadow just behind the subject, bright skin highlights, candid snapshot feel" },
       { id: "studio-strobe", label: "影棚闪光", prompt: "medium-format camera with studio strobes and a large softbox, crisp detail, soft controlled shadows" }
     ],
+    // Redrawing a finished work at 2K or 4K through the same channel.
+    upscale: { enabled: true, quality: "medium", hdCredits: 20, uhdCredits: 45 },
     tokenPriceUsd: { textInput: 5, imageInput: 8, imageOutput: 30 },
     fallbackCostUsd: { low: 0.006, medium: 0.053, high: 0.211 },
     usdToCny: 7.2
@@ -109,7 +111,9 @@ export const DEFAULTS = {
     camera: "Camera and lens: {value}.",
     realism: "Make it look like a real, unretouched photograph: natural skin texture with pores and fine hair, slight asymmetry, real fabric creases, physically plausible light and shadows. Avoid the smooth, glossy, over-sharpened or over-saturated look of AI images.",
     user: "Additional instructions from the user: {value}",
-    outro: "Output a single finished image, not a collage, comparison sheet or reference board. Do not add text, captions, labels, frames or watermarks."
+    outro: "Output a single finished image, not a collage, comparison sheet or reference board. Do not add text, captions, labels, frames or watermarks.",
+    // Used on its own for 超分 (upscaling a finished work), not with the lines above.
+    upscale: "Image 1 is a finished image. Recreate it at a higher resolution as a faithful, high-fidelity upscale. Keep the composition, framing, people, faces, expressions, pose, hands, clothing, colours, lighting and background exactly as they are. Only add the fine detail a higher-resolution camera would capture: skin texture, individual hair strands, fabric weave, crisp edges. Do not add, remove, move or restyle anything, and do not add text, borders or watermarks."
   },
   safety: {
     suggestiveForAI: true,
@@ -505,6 +509,12 @@ function sanitize(group, v) {
         styles: presetList(v.styles, d.styles),
         scenes: presetList(v.scenes, d.scenes),
         cameras: presetList(v.cameras, d.cameras),
+        upscale: {
+          enabled: flag(v.upscale?.enabled, d.upscale.enabled),
+          quality: pick(v.upscale?.quality, ["low", "medium", "high"], d.upscale.quality),
+          hdCredits: intIn(v.upscale?.hdCredits, 0, 100000, d.upscale.hdCredits),
+          uhdCredits: intIn(v.upscale?.uhdCredits, 0, 100000, d.upscale.uhdCredits)
+        },
         tokenPriceUsd: {
           textInput: numIn(price.textInput, 0, 1000, d.tokenPriceUsd.textInput),
           imageInput: numIn(price.imageInput, 0, 1000, d.tokenPriceUsd.imageInput),
@@ -677,6 +687,7 @@ export function publicConfig() {
       styles: gen.styles.map(({ id, label }) => ({ id, label })),
       scenes: gen.scenes.map(({ id, label }) => ({ id, label })),
       cameras: gen.cameras.map(({ id, label }) => ({ id, label })),
+      upscale: { enabled: gen.upscale.enabled, hdCredits: gen.upscale.hdCredits, uhdCredits: gen.upscale.uhdCredits },
       maxItems: MAX_ITEMS,
       personRetentionDays: safety.personRetentionDays
     },

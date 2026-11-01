@@ -34,6 +34,26 @@ export async function render(ctx) {
     }));
   }
 
+  function addCard(gen, { prepend = false } = {}) {
+    const card = genCard(gen, { keep, onChange: (g) => {
+      if (g) return;
+      cards.delete(gen.id);
+      total -= 1;
+      summary.textContent = `共 ${total} 个作品`;
+      if (!cards.size) showEmpty();
+    }, onCreated: (g) => {
+      // A 超分 work is new and in progress: it belongs under 全部 and 进行中.
+      if ((status && status !== "active") || cards.has(g.id)) return;
+      if (!cards.size) list.replaceChildren();
+      total += 1;
+      summary.textContent = `共 ${total} 个作品`;
+      addCard(g, { prepend: true });
+    } });
+    cards.set(gen.id, card);
+    if (prepend) list.prepend(card.node); else list.append(card.node);
+    if (gen.status === "queued" || gen.status === "running") watcher.watch(gen.id);
+  }
+
   async function load(reset) {
     if (reset) { page = 1; cards.forEach((c) => c.destroy()); cards.clear(); list.replaceChildren(); }
     else page += 1;
@@ -41,18 +61,7 @@ export async function render(ctx) {
     try {
       const data = await api.get("/api/generations", { status, page, size });
       total = data.total;
-      for (const gen of data.items) {
-        const card = genCard(gen, { keep, onChange: (g) => {
-          if (g) return;
-          cards.delete(gen.id);
-          total -= 1;
-          summary.textContent = `共 ${total} 个作品`;
-          if (!cards.size) showEmpty();
-        } });
-        cards.set(gen.id, card);
-        list.append(card.node);
-        if (gen.status === "queued" || gen.status === "running") watcher.watch(gen.id);
-      }
+      for (const gen of data.items) addCard(gen);
       summary.textContent = `共 ${total} 个作品`;
       more.hidden = cards.size >= total;
       if (!total) showEmpty();

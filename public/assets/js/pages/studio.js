@@ -575,7 +575,8 @@ export async function render(ctx) {
   function addCard(gen, { prepend = false } = {}) {
     const card = genCard(gen, {
       keep,
-      onChange: (g) => { if (!g) { cards.delete(gen.id); showEmpty(); } }
+      onChange: (g) => { if (!g) { cards.delete(gen.id); showEmpty(); } },
+      onCreated: (g) => { if (!filter && !cards.has(g.id)) { addCard(g, { prepend: true }); canvas.scrollTo({ top: 0, behavior: "smooth" }); } }
     });
     cards.set(gen.id, card);
     if (prepend) feed.prepend(card.node); else feed.append(card.node);

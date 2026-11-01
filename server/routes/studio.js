@@ -89,6 +89,14 @@ router.post("/generations/:id/flags", requireUser, (req, res) => {
   res.json({ generation: generations.setFlags(req.user, req.params.id, flags) });
 });
 
+// 超分: { imageId, target: "hd" | "uhd" } redraws one image of the work at 2K or 4K as a new work.
+router.post("/generations/:id/upscale", requireUser, (req, res) => {
+  const generation = generations.upscale(req.user, req.params.id,
+    { imageId: req.body?.imageId, target: req.body?.target }, { ip: req.ip });
+  worker.kick();
+  res.status(201).json({ generation });
+});
+
 router.post("/generations/:id/publish", requireUser, (req, res) => {
   res.json({ generation: generations.setPublic(req.user, req.params.id, v.bool(req.body?.public)) });
 });

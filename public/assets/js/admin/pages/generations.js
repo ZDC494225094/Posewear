@@ -30,6 +30,7 @@ function openDetail(g, refresh) {
       ["用户", `${g.userEmail}（#${g.userId}）`], ["状态", STATUS_TEXT[g.status]],
       isAsset ? ["素材", `${assetJobText(g)}${p.platform ? " · 平台素材" : " · 用户素材"}`] : null,
       ["参数", `${g.ratio} · ${g.size} · ${QUALITY_TEXT[g.quality] || g.quality} · ${g.n} 张`],
+      g.upscaleOf ? ["超分", `源图片 ${g.upscaleOf}，只发送这一张图和超分提示词`] : null,
       isAsset ? null : ["风格 / 场景", [g.style, g.scene].filter(Boolean).join(" / ") || "—"],
       isAsset
         ? ["参考", g.sourceAssetId ? `补全角度，源素材 ${g.sourceAssetId}${p.sourceName ? `（${p.sourceName}）` : ""}` : g.refUploadId ? "参考图" : "纯文字"]
@@ -81,6 +82,7 @@ export async function render(ctx) {
       { label: "用户", render: (g) => g.userEmail },
       { label: "状态", render: (g) => [statusPill(STATUS_TEXT[g.status], TONE[g.status]),
         g.kind === "asset" ? statusPill("素材生成", "blue") : null,
+        g.upscaleOf ? statusPill("超分", "blue") : null,
         g.isPublic ? statusPill(g.approved ? "公开" : "待审", g.approved ? "" : "tape") : null,
         g.hidden ? statusPill("已隐藏", "pin") : null, g.featured ? statusPill("推荐", "tape") : null, g.hasPerson ? statusPill("人物照片") : null] },
       { label: "参数", render: (g) => (g.kind === "asset" ? `${assetJobText(g)} · ${g.n} 张` : `${g.ratio} · ${QUALITY_TEXT[g.quality] || g.quality} · ${g.n} 张`) },

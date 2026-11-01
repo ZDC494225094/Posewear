@@ -10,7 +10,7 @@ import * as channels from "./channels.js";
 import * as fees from "./asset-fees.js";
 import { buildPrompt, findBannedWord } from "./prompt.js";
 import { creditCost, unitCost } from "./pricing.js";
-import { flexibleSize } from "./sizes.js";
+import { flexibleSize, upscaleSize } from "./sizes.js";
 import { randomId } from "../lib/crypto.js";
 import { badRequest, forbidden, notFound, HttpError } from "../lib/errors.js";
 import { enforce } from "../lib/rate-limit.js";
@@ -24,6 +24,9 @@ export function imageFile(rel) {
   if (!full.startsWith(path.resolve(genRoot) + path.sep)) throw new Error("Invalid generation path");
   return full;
 }
+
+// The WebP display copy saved next to an image (made on first view for old ones).
+export const viewRel = (rel) => rel.replace(/\.[a-z]+$/, ".view.webp");
 
 function imagesFor(ids) {
   if (!ids.length) return new Map();
@@ -107,15 +110,18 @@ export function dto(row, images = [], { owner = true } = {}) {
     errorCode: row.error_code, errorMessage: row.error_message,
     isPublic: !!row.is_public, hidden: !!row.hidden, featured: !!row.featured, approved: !!row.approved,
     personKind: row.person_kind, userHidden: !!row.user_hidden, favorite: !!row.favorite,
+    upscaleOf: row.upscale_of || null,
     refs: refSummary(row, { owner }),
     images,
     createdAt: row.created_at, startedAt: row.started_at, finishedAt: row.finished_at, publishedAt: row.published_at
   };
 }
 
+// The owner's works. Each image says which 超分 sizes it can still go to.
 export function withImages(rows) {
   const map = imagesFor(rows.map((r) => r.id));
-  return rows.map((r) => dto(r, map.get(r.id) || []));
+  return rows.map((r) => dto(r, (map.get(r.id) || []).map((img) => ({ ...img,
+    upscale: { hd: upscaleSize(img.width, img.height, "hd"), uhd: upscaleSize(img.width, img.height, "uhd") } }))));
 }
 
 // ---------- create
@@ -238,25 +244,29 @@ export function estimate(user, input) {
   return { cost: creditCost(r) + r.assetFee, assetFee: r.assetFee, unit: unitCost(r.quality, r.tier), size: flexibleSize(r.ratio, r.tier) };
 }
 
+// Only studio work counts: a wedding album or an asset batch in progress doesn't block the studio.
+function checkCaps(user, gen) {
+  const active = db.prepare(`SELECT COUNT(*) AS n FROM generations WHERE user_id = ? AND status IN ('queued','running')
+    AND kind = 'work' AND shoot_id IS NULL`).get(user.id).n;
+  if (active >= gen.maxActivePerUser) {
+    throw new HttpError(429, "TOO_MANY_ACTIVE", `最多同时进行 ${gen.maxActivePerUser} 个任务，请等当前任务完成`);
+  }
+  if (gen.dailyLimitPerUser > 0) {
+    const today = db.prepare("SELECT COUNT(*) AS n FROM generations WHERE user_id = ? AND kind = 'work' AND shoot_id IS NULL AND created_at >= ?")
+      .get(user.id, startOfLocalDay()).n;
+    if (today >= gen.dailyLimitPerUser) {
+      throw new HttpError(429, "DAILY_LIMIT", `今日生成次数已达上限（${gen.dailyLimitPerUser} 次），明天再来吧`);
+    }
+  }
+}
+
 export function create(user, input, { ip }) {
   enforce(`gen:${user.id}`, 20, 60_000, "提交太频繁，请稍后再试");
   const r = validateRequest(user, input);
   if (!channels.hasUsableChannel()) {
     throw new HttpError(503, "NO_CHANNEL", "生成服务尚未配置完成，请联系管理员");
   }
-  // Only studio work counts: a wedding album or an asset batch in progress doesn't block the studio.
-  const active = db.prepare(`SELECT COUNT(*) AS n FROM generations WHERE user_id = ? AND status IN ('queued','running')
-    AND kind = 'work' AND shoot_id IS NULL`).get(user.id).n;
-  if (active >= r.gen.maxActivePerUser) {
-    throw new HttpError(429, "TOO_MANY_ACTIVE", `最多同时进行 ${r.gen.maxActivePerUser} 个任务，请等当前任务完成`);
-  }
-  if (r.gen.dailyLimitPerUser > 0) {
-    const today = db.prepare("SELECT COUNT(*) AS n FROM generations WHERE user_id = ? AND kind = 'work' AND shoot_id IS NULL AND created_at >= ?")
-      .get(user.id, startOfLocalDay()).n;
-    if (today >= r.gen.dailyLimitPerUser) {
-      throw new HttpError(429, "DAILY_LIMIT", `今日生成次数已达上限（${r.gen.dailyLimitPerUser} 次），明天再来吧`);
-    }
-  }
+  checkCaps(user, r.gen);
 
   const cost = creditCost(r) + r.assetFee;
   const personKind = r.person?.kind || "none";
@@ -287,6 +297,52 @@ export function create(user, input, { ip }) {
     library.bumpUse([r.pose?.id, r.outfit?.id, r.sceneAsset?.id, ...r.items.map((a) => a.id)]);
   })();
 
+  return getOwned(user, id);
+}
+
+// ---------- 超分
+
+const UPSCALE_TEXT = { hd: "2K", uhd: "4K" };
+
+// Only channels that take custom sizes can draw at 2K or 4K.
+export const canUpscaleOn = (channel) => channel.kind === "mock" || channel.options.sizeMode === "flexible";
+
+// Redraw one image of a finished work at 2K or 4K. The result is a new work
+// that keeps the source's references, person kind and admin hiding, so it is
+// shared (or kept private) on the same terms; it costs the 超分 price and no
+// asset usage fees.
+export function upscale(user, generationId, input, { ip }) {
+  enforce(`gen:${user.id}`, 20, 60_000, "提交太频繁，请稍后再试");
+  const gen = settings.get("generation");
+  if (!gen.enabled) throw forbidden(gen.maintenanceMessage || "生成服务维护中", "GENERATION_DISABLED");
+  if (!gen.upscale.enabled) throw forbidden("超分暂未开放", "UPSCALE_DISABLED");
+  const target = v.oneOf(input.target, "target", ["hd", "uhd"]);
+  const source = ownedRow(user, generationId);
+  const image = source.status === "succeeded"
+    ? db.prepare("SELECT * FROM generation_images WHERE id = ? AND generation_id = ?").get(String(input.imageId || ""), source.id) : null;
+  if (!image) throw notFound("图片不存在或已删除");
+  if (source.person_kind === "real" && !gen.allowPersonPhoto) throw forbidden("当前未开放人物照片功能", "PERSON_DISABLED");
+  const size = upscaleSize(image.width, image.height, target);
+  if (!size) throw badRequest("ALREADY_LARGE", `这张图已经是${UPSCALE_TEXT[target]}或更大，不需要超分`);
+  if (!channels.enabledChannels().some((c) => (c.kind === "mock" || c.apiKey) && canUpscaleOn(c))) {
+    throw new HttpError(503, "UPSCALE_UNSUPPORTED", "当前的生成渠道不支持超分，请联系管理员");
+  }
+  checkCaps(user, gen);
+
+  const cost = target === "uhd" ? gen.upscale.uhdCredits : gen.upscale.hdCredits;
+  const id = randomId(12);
+  tx(() => {
+    credits.adjust(user.id, -cost, "generation", { refType: "generation", refId: id,
+      note: `超分 ${UPSCALE_TEXT[target]} · ${size.replace("x", "×")}` });
+    db.prepare(`INSERT INTO generations (id, user_id, status, mode, pose_id, outfit_id, outfit_upload_id, person_upload_id,
+      person_image_id, person_kind, scene_asset_id, item_ids, style, scene, camera, realism, prompt_user, prompt_final,
+      ratio, tier, size, quality, n, cost_credits, asset_fee, consent_at, hidden, upscale_of, client_ip, created_at)
+      VALUES (?, ?, 'queued', 'edit', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 0, ?, ?, ?, ?, ?)`).run(
+      id, user.id, source.pose_id, source.outfit_id, source.outfit_upload_id, source.person_upload_id,
+      source.person_image_id, source.person_kind, source.scene_asset_id, source.item_ids, source.style, source.scene,
+      source.camera, source.realism, source.prompt_user, settings.get("prompt").upscale,
+      source.ratio, target, size, gen.upscale.quality, cost, source.consent_at, source.hidden, image.id, ip, Date.now());
+  })();
   return getOwned(user, id);
 }
 
@@ -337,7 +393,7 @@ export function softDelete(user, id) {
 export function removeFiles(generationId) {
   const imgs = db.prepare("SELECT path, thumb_path FROM generation_images WHERE generation_id = ?").all(generationId);
   for (const img of imgs) {
-    for (const rel of [img.path, img.thumb_path]) {
+    for (const rel of [img.path, img.thumb_path, viewRel(img.path)]) {
       try { fs.rmSync(imageFile(rel), { force: true }); } catch { /* ignore */ }
     }
   }

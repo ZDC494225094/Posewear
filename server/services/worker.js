@@ -16,7 +16,7 @@ import { summarizeFailures } from "./providers/errors.js";
 import { finalizeImage } from "./image-post.js";
 import { apiCostUsd } from "./pricing.js";
 import { sizeForChannel } from "./sizes.js";
-import { genRoot, imageFile } from "./generations.js";
+import { genRoot, imageFile, canUpscaleOn } from "./generations.js";
 import { randomId, sha256 } from "../lib/crypto.js";
 import { config } from "../config.js";
 import { log } from "../lib/logger.js";
@@ -124,6 +124,12 @@ async function prepare(file, { lineArt, maxEdge }) {
 async function loadInputs(job) {
   const maxEdge = settings.get("generation").inputMaxEdge;
   const images = [];
+  // 超分 sends only the image being redrawn, at up to 2048 px so the model sees its detail.
+  if (job.upscale_of) {
+    const row = db.prepare("SELECT path FROM generation_images WHERE id = ?").get(job.upscale_of);
+    if (!row || !fs.existsSync(imageFile(row.path))) throw new InputError("要超分的图片已被删除");
+    return [{ ...(await prepare(imageFile(row.path), { lineArt: false, maxEdge: Math.max(maxEdge, 2048) })), name: "image.jpg" }];
+  }
   if (job.kind === "asset" || job.shoot_id) {
     const inputs = job.kind === "asset" ? assetJobs.inputFiles(job) : wedding.inputFiles(job);
     for (const input of inputs) {
@@ -263,6 +269,15 @@ function recordResults(job, stored, channel, size, result, cost) {
   })();
 }
 
+// At least 80% of the asked-for pixels (relays may round sizes a little).
+async function largeEnough(image, size) {
+  const [w, h] = size.split("x").map(Number);
+  try {
+    const meta = await sharp(image, { limitInputPixels: 80_000_000 }).metadata();
+    return meta.width * meta.height >= w * h * 0.8;
+  } catch { return false; }
+}
+
 // ---------- main
 
 // onPrepared: called once the inputs are ready and the job is about to use a channel.
@@ -277,7 +292,7 @@ async function runJob(job, onPrepared = () => {}) {
     return;
   }
 
-  const candidates = channels.enabledChannels().filter((c) => c.kind === "mock" || c.apiKey);
+  const candidates = channels.enabledChannels().filter((c) => (c.kind === "mock" || c.apiKey) && (!job.upscale_of || canUpscaleOn(c)));
   if (!candidates.length) {
     fail(job, { code: "NO_CHANNEL", publicMessage: PUBLIC_MESSAGES.unavailable, detail: "No enabled channel with an API key" });
     return;
@@ -294,14 +309,15 @@ async function runJob(job, onPrepared = () => {}) {
   const safetyIdentifier = user ? sha256(`${config.appSecret}:user:${user.id}`).slice(0, 32) : undefined;
   const errors = [];
   for (const channel of free) {
-    const size = sizeForChannel(job.ratio, job.tier, channel.options.sizeMode);
+    const size = job.upscale_of ? job.size : sizeForChannel(job.ratio, job.tier, channel.options.sizeMode);
     channelActive.set(channel.id, (channelActive.get(channel.id) || 0) + 1);
     let result;
     try {
       result = await providerFor(channel).run(channel, {
         prompt: job.prompt_final, images: inputs, size, quality: job.quality, n: job.n,
         moderation: gen.moderation, outputFormat: "png", outputCompression: gen.outputCompression,
-        safetyIdentifier, timeoutSec: gen.requestTimeoutSec
+        // A 2K or 4K redraw takes longer; timing out would pay for the image and then retry it.
+        safetyIdentifier, timeoutSec: job.upscale_of ? Math.max(gen.requestTimeoutSec, 480) : gen.requestTimeoutSec
       });
     } catch (err) {
       const perr = err instanceof ProviderError ? err
@@ -324,6 +340,13 @@ async function runJob(job, onPrepared = () => {}) {
     // The channel delivered (and was paid). A failure from here on is ours:
     // don't blame the channel or ask another one, refund and stop.
     channels.markSuccess(channel.id);
+    // Some relays ignore the size; a 超分 that came back no larger isn't one.
+    if (job.upscale_of && !(await largeEnough(result.images[0], size))) {
+      fail(job, { code: "UPSCALE_TOO_SMALL", publicMessage: "生成渠道没有返回更高分辨率的图片，本次点数已退回。",
+        detail: `asked for ${size}, channel #${channel.id} returned a smaller image` });
+      log.warn(`Generation ${job.id}: channel #${channel.id} ignored the 超分 size ${size}`);
+      return;
+    }
     try {
       const save = job.kind === "asset" ? assetJobs.saveResults : saveResults;
       await save(job, result, channel, result.size && result.size !== "auto" ? result.size : size);

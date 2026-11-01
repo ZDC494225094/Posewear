@@ -122,7 +122,7 @@ export function zoomImage(src, { alt = "" } = {}) {
       tool("1:1", "原始大小", () => zoomTo(1)), tool("适应", "适应屏幕", fit),
       h("a.zoom-btn", { href: src, target: "_blank", rel: "noopener", "data-native": "", title: "新窗口打开" }, "↗"),
       tool("×", "关闭", () => close())),
-    h("p.zoom-hint", "滚轮或双指缩放，拖动查看细节，双击切换适应 / 原始大小"));
+    h("p.zoom-hint", "滚轮或双指缩放，拖动查看细节，双击切换适应 / 原始大小，点图片外关闭"));
   let scale = 1, x = 0, y = 0, fitScale = 1, fitted = true;
   const pointers = new Map();
   let pinch = null;
@@ -169,7 +169,17 @@ export function zoomImage(src, { alt = "" } = {}) {
     if (fitted || scale < 0.99) zoomAt(1, e.clientX - r.left, e.clientY - r.top);
     else fit();
   });
+  // A click on the dark area around the image closes the view; a drag that
+  // starts there only pans.
+  let downAt = null;
+  stage.addEventListener("click", (e) => {
+    const moved = downAt ? Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) : 0;
+    // Pointer capture retargets the click to the stage, so use where it started.
+    if (moved > 6 || downAt?.target === img) return;
+    close();
+  });
   stage.addEventListener("pointerdown", (e) => {
+    if (!pointers.size) downAt = { x: e.clientX, y: e.clientY, target: e.target };
     stage.setPointerCapture(e.pointerId);
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.size === 2) {

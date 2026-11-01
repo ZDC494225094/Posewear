@@ -1,7 +1,7 @@
 import { h, icon, tile, cicon, replace } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { store, draft } from "../core/store.js";
-import { toast, toastError, confirmDialog, lightbox, modal } from "../core/ui.js";
+import { toast, toastError, confirmDialog, lightbox, modal, busy } from "../core/ui.js";
 import { relative, STATUS_TEXT, QUALITY_TEXT, number } from "../core/format.js";
 import { navigate } from "../core/nav.js";
 
@@ -25,7 +25,7 @@ function waitingView(gen) {
     const pct = Math.min(94, 6 + 88 * (1 - Math.exp(-elapsed / (expected * 0.6))));
     fill.style.width = `${pct.toFixed(1)}%`;
     bar.setAttribute("aria-valuenow", String(Math.round(pct)));
-    text.textContent = `正在生成${gen.n > 1 ? ` ${gen.n} 张` : ""} · ${Math.round(elapsed)} 秒`;
+    text.textContent = `${gen.upscaleOf ? "正在超分" : `正在生成${gen.n > 1 ? ` ${gen.n} 张` : ""}`} · ${Math.round(elapsed)} 秒`;
   }
   update();
   const timer = setInterval(update, 1000);
@@ -64,7 +64,10 @@ export function refBlock(refs) {
     h("figcaption", name, chip && thumb ? h("span.faint", ` · ${chip}`) : null))));
 }
 
+const UPSCALE_TEXT = { hd: "2K", uhd: "4K" };
+
 export function settingsText(gen) {
+  if (gen.upscaleOf) return ["超分", UPSCALE_TEXT[gen.tier], gen.size?.replace("x", " × ")].filter(Boolean).join(" · ");
   const cfg = store.config.generation;
   const style = cfg.styles.find((s) => s.id === gen.style)?.label;
   const scene = cfg.scenes.find((s) => s.id === gen.scene)?.label;
@@ -86,7 +89,9 @@ export function reuseInStudio(gen) {
   const person = refs.person?.id && refs.person.thumb
     ? { source: refs.person.source, id: refs.person.id, url: refs.person.thumb, virtual: refs.person.kind === "virtual" }
     : null;
-  draft.patch({ ratio: gen.ratio, tier: gen.tier, quality: gen.quality, n: gen.n, style: gen.style, scene: gen.scene,
+  // A 超分 work's tier and quality are the 超分 settings, not how the source was made.
+  const made = gen.upscaleOf ? {} : { tier: gen.tier, quality: gen.quality, n: gen.n };
+  draft.patch({ ratio: gen.ratio, ...made, style: gen.style, scene: gen.scene,
     camera: gen.camera || "", realism: !!gen.realism,
     prompt: gen.prompt || "", pose: null, outfit: null, outfitUpload, sceneAsset: null, items: [], person });
   const params = new URLSearchParams();
@@ -143,7 +148,8 @@ const actionButton = (iconName, color, text, onclick, { pressed } = {}) =>
 // One generation job: progress while it runs, then the images. `onChange(gen | null)`
 // reports updates and removal. `keep(gen)` says whether the card still belongs
 // in its list after the user hides, unhides or unfavourites it.
-export function genCard(gen, { onChange, keep } = {}) {
+// `onCreated(gen)` receives a new work started from this one (超分).
+export function genCard(gen, { onChange, keep, onCreated } = {}) {
   const root = h("article.gen", { dataset: { id: gen.id } });
   let waiting = null;
 
@@ -171,7 +177,7 @@ export function genCard(gen, { onChange, keep } = {}) {
       body = h("div.gen-grid", { class: `n-${Math.max(1, shown.length)}` },
         shown.map((img, i) => h("div.gen-shot",
           h("button.gen-shot-open", { type: "button", "aria-label": `查看第 ${i + 1} 张大图`,
-            onclick: () => openViewer(gen, i, { onChange: (g) => { if (g) { gen = g; render(); onChange?.(g); } } }) },
+            onclick: () => openViewer(gen, i, { onCreated, onChange: (g) => { if (g) { gen = g; render(); onChange?.(g); } } }) },
             h("img", { src: img.thumb, alt: `生成结果 ${i + 1}`, loading: "lazy" })),
           h("div.gen-shot-tools",
             h("a", { href: img.download, download: "", "data-native": "", title: "下载原图", "aria-label": `下载第 ${i + 1} 张` }, icon("download", 16))))),
@@ -269,9 +275,50 @@ export function reportDialog(generationId) {
   });
 }
 
+// 超分: redraw this image at 2K or 4K as a new work. Shows only the sizes the
+// image can still go to.
+function upscaleSection(gen, img, { close, onCreated }) {
+  const cfg = store.config.generation.upscale;
+  const allowPerson = store.config.generation.allowPersonPhoto || gen.personKind !== "real";
+  if (!cfg?.enabled || !allowPerson || gen.status !== "succeeded" || !img.upscale) return null;
+  const options = [["hd", cfg.hdCredits], ["uhd", cfg.uhdCredits]].filter(([target]) => img.upscale[target]);
+  if (!options.length) return null;
+  async function run(target, cost) {
+    const label = UPSCALE_TEXT[target];
+    const size = img.upscale[target].replace("x", " × ");
+    if ((store.user?.credits ?? 0) < cost) {
+      toast(`超分到 ${label} 需要 ${cost} 点，余额不足`, { type: "error" });
+      return;
+    }
+    const ok = await confirmDialog({ title: `超分到 ${label}`,
+      message: `按原构图把这张图重绘为 ${size}，消耗 ${cost} 点（余额 ${number(store.user.credits)} 点），失败自动退回。结果是一个新作品，原图保留。超分由 AI 补充细节，五官、手部和小字可能有细微变化。`,
+      confirmText: `超分 · ${cost} 点` });
+    if (!ok) return;
+    try {
+      const { generation } = await api.post(`/api/generations/${gen.id}/upscale`, { imageId: img.id, target });
+      store.patchUser({ credits: store.user.credits - generation.cost });
+      toast(`已开始超分到 ${label}，完成后作为新作品出现在列表最前面`, { type: "success" });
+      close();
+      onCreated?.(generation);
+    } catch (err) {
+      if (err.code === "INSUFFICIENT_CREDITS") store.refreshUser();
+      toastError(err);
+    }
+  }
+  return h("div.viewer-sec",
+    h("p.viewer-sec-title", "超分"),
+    h("div.upscale-options", options.map(([target, cost]) => h("button.btn.upscale-btn", { type: "button",
+      "aria-label": `超分到 ${UPSCALE_TEXT[target]}，${img.upscale[target].replace("x", " × ")}，${cost} 点`,
+      onclick: (e) => busy(e.currentTarget, () => run(target, cost)) },
+      h("span.upscale-name", UPSCALE_TEXT[target]),
+      h("span.upscale-cost.num", `${cost} 点`),
+      h("span.upscale-size.num", img.upscale[target].replace("x", " × "))))),
+    h("p.small.faint", "按原构图重绘到更高分辨率，另存为新作品。"));
+}
+
 // Full-size viewer for the owner's work: what it was made from, download,
-// publishing, and sending it back to the studio.
-export function openViewer(gen, start = 0, { onChange } = {}) {
+// publishing, 超分, and sending it back to the studio.
+export function openViewer(gen, start = 0, { onChange, onCreated } = {}) {
   const items = gen.images.map((img, i) => ({ src: img.view || img.url, zoomSrc: img.url, alt: `生成结果 ${i + 1}`, img }));
   return lightbox(items, start, {
     renderAside: (item, { close }) => {
@@ -294,6 +341,7 @@ export function openViewer(gen, start = 0, { onChange } = {}) {
         gen.refs?.license ? h("p.small.muted", gen.refs.license === "commercial"
           ? "用到的素材均可商用。" : "用到了非商用素材，这张图仅限个人非商业用途。") : null,
         h("p.small.faint", `${item.img.width} × ${item.img.height} · ${item.img.format.toUpperCase()}`),
+        upscaleSection(gen, item.img, { close, onCreated }),
         h("div.viewer-actions",
           h("a.btn.btn-primary.btn-block", { href: item.img.download, download: "", "data-native": "" }, cicon("download", "green"), "下载原图"),
           h("button.btn.btn-block", { type: "button", onclick: () => { close(); reuseInStudio(gen); } },

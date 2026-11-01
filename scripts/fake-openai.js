@@ -6,8 +6,9 @@
 //   then set a channel's Base URL to http://127.0.0.1:8787/v1 with any API key.
 //
 // Put "[fake:moderation]", "[fake:503]", "[fake:quota]" or "[fake:param]" in a
-// prompt to simulate the corresponding upstream error, or "[fake:slow]" for a
-// response that takes 1.5 s.
+// prompt to simulate the corresponding upstream error, "[fake:slow]" for a
+// response that takes 1.5 s, or "[fake:1k]" for a relay that ignores the
+// requested size and always answers 1024×1024.
 import http from "node:http";
 import { pathToFileURL } from "node:url";
 import sharp from "sharp";
@@ -89,7 +90,7 @@ export function createFakeOpenAI({ log = false } = {}) {
       return json(res, 400, { error: { message: "input_fidelity is not supported for this model", type: "invalid_request_error", code: "unsupported_parameter" } });
     }
 
-    const [w, h] = String(fields.size || "1024x1024").split("x").map(Number);
+    const [w, h] = (prompt.includes("[fake:1k]") ? "1024x1024" : String(fields.size || "1024x1024")).split("x").map(Number);
     const n = Number(fields.n || 1);
     const data = [];
     for (let i = 0; i < n; i++) {
