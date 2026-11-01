@@ -15,8 +15,8 @@ import { providerFor, ProviderError, PUBLIC_MESSAGES } from "./providers/index.j
 import { summarizeFailures } from "./providers/errors.js";
 import { finalizeImage } from "./image-post.js";
 import { apiCostUsd } from "./pricing.js";
-import { sizeForChannel } from "./sizes.js";
-import { genRoot, imageFile, canUpscaleOn } from "./generations.js";
+import { sizeForChannel, dims, tierOfPixels } from "./sizes.js";
+import { genRoot, imageFile } from "./generations.js";
 import { randomId, sha256 } from "../lib/crypto.js";
 import { config } from "../config.js";
 import { log } from "../lib/logger.js";
@@ -202,7 +202,7 @@ function requeue(job, delayMs, { countAttempt = true, detail = "" } = {}) {
     attempts = attempts - ? WHERE id = ?`).run(Date.now() + delayMs, String(detail).slice(0, 4000), countAttempt ? 0 : 1, job.id);
 }
 
-async function saveResults(job, result, channel, size) {
+async function saveResults(job, result, channel, size, short = false) {
   const stored = [];
   const month = new Date().toISOString().slice(0, 7);
   const dir = path.join(genRoot, month);
@@ -214,9 +214,9 @@ async function saveResults(job, result, channel, size) {
     removeImages(stored);
     throw err;
   }
-  const cost = apiCostUsd({ usage: result.usage, quality: job.quality, size, n: images.length });
+  const cost = apiCostUsd({ usage: result.usage, quality: job.quality, size, n: images.length, model: channel.model });
   try {
-    recordResults(job, stored, channel, size, result, cost);
+    recordResults(job, stored, channel, size, result, cost, short);
   } catch (err) {
     removeImages(stored);
     throw err;
@@ -241,7 +241,7 @@ function removeImages(stored) {
   for (const s of stored) for (const rel of [s.rel, s.thumbRel, s.viewRel]) fs.rmSync(imageFile(rel), { force: true });
 }
 
-function recordResults(job, stored, channel, size, result, cost) {
+function recordResults(job, stored, channel, size, result, cost, short) {
   tx(() => {
     const insert = db.prepare(`INSERT INTO generation_images (id, generation_id, user_id, idx, path, thumb_path,
       width, height, bytes, format, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
@@ -266,16 +266,38 @@ function recordResults(job, stored, channel, size, result, cost) {
         db.prepare("UPDATE generations SET refunded_credits = refunded_credits + ? WHERE id = ?").run(amount, job.id);
       }
     }
+    // A studio work that came back below its tier is charged for the tier it got.
+    if (short && !job.shoot_id && !job.upscale_of) chargeAsDelivered(job, stored);
   })();
 }
 
-// At least 80% of the asked-for pixels (relays may round sizes a little).
-async function largeEnough(image, size) {
-  const [w, h] = size.split("x").map(Number);
+// Refund the difference between the tier asked for and the tier delivered,
+// and record the delivered tier, so the work shows and costs what it is.
+function chargeAsDelivered(job, stored) {
+  const gen = settings.get("generation");
+  const { width, height } = stored[0].final;
+  const tier = tierOfPixels(width * height, job.ratio);
+  const quality = gen.qualities.find((q) => q.id === job.quality);
+  const multiplier = gen.tiers.find((t) => t.id === tier)?.multiplier ?? 1;
+  const paid = Math.floor((job.cost_credits - job.asset_fee) / job.n);
+  const amount = Math.max(0, paid - Math.ceil((quality?.credits ?? 0) * multiplier)) * stored.length;
+  const label = gen.tiers.find((t) => t.id === tier)?.label || tier;
+  const message = `生成渠道只返回了 ${width}×${height} 的图，按「${label}」清晰度收费${amount ? `，已退回 ${amount} 点` : ""}。`;
+  db.prepare("UPDATE generations SET tier = ?, error_code = 'SIZE_DOWNGRADED', error_message = ? WHERE id = ?").run(tier, message, job.id);
+  if (amount > 0) {
+    credits.adjust(job.user_id, amount, "refund", { refType: "generation", refId: job.id, note: message });
+    db.prepare("UPDATE generations SET refunded_credits = refunded_credits + ? WHERE id = ?").run(amount, job.id);
+  }
+}
+
+// The request deadline grows with the size: 2K ×1.5, 4K ×2 (240 s -> 360 s, 480 s).
+const TIMEOUT_SCALE = { standard: 1, hd: 1.5, uhd: 2 };
+
+async function imageDims(image) {
   try {
     const meta = await sharp(image, { limitInputPixels: 80_000_000 }).metadata();
-    return meta.width * meta.height >= w * h * 0.8;
-  } catch { return false; }
+    return meta.width && meta.height ? [meta.width, meta.height] : null;
+  } catch { return null; }
 }
 
 // ---------- main
@@ -292,7 +314,11 @@ async function runJob(job, onPrepared = () => {}) {
     return;
   }
 
-  const candidates = channels.enabledChannels().filter((c) => (c.kind === "mock" || c.apiKey) && (!job.upscale_of || canUpscaleOn(c)));
+  // Works and wedding photos at 2K or 4K, and 超分, go only to channels that
+  // deliver that size; a fixed-size one would answer with a 1024-class image.
+  // Asset jobs are resized to their spec, so any channel will do.
+  const needs = job.kind === "work" ? job.tier : "standard";
+  const candidates = channels.enabledChannels().filter((c) => (c.kind === "mock" || c.apiKey) && channels.serves(c, needs));
   if (!candidates.length) {
     fail(job, { code: "NO_CHANNEL", publicMessage: PUBLIC_MESSAGES.unavailable, detail: "No enabled channel with an API key" });
     return;
@@ -316,8 +342,8 @@ async function runJob(job, onPrepared = () => {}) {
       result = await providerFor(channel).run(channel, {
         prompt: job.prompt_final, images: inputs, size, quality: job.quality, n: job.n,
         moderation: gen.moderation, outputFormat: "png", outputCompression: gen.outputCompression,
-        // A 2K or 4K redraw takes longer; timing out would pay for the image and then retry it.
-        safetyIdentifier, timeoutSec: job.upscale_of ? Math.max(gen.requestTimeoutSec, 480) : gen.requestTimeoutSec
+        // Larger images take longer; timing out would pay for the image and then retry it.
+        safetyIdentifier, timeoutSec: gen.requestTimeoutSec, timeoutScale: TIMEOUT_SCALE[job.tier] || 1
       });
     } catch (err) {
       const perr = err instanceof ProviderError ? err
@@ -340,16 +366,25 @@ async function runJob(job, onPrepared = () => {}) {
     // The channel delivered (and was paid). A failure from here on is ours:
     // don't blame the channel or ask another one, refund and stop.
     channels.markSuccess(channel.id);
-    // Some relays ignore the size; a 超分 that came back no larger isn't one.
-    if (job.upscale_of && !(await largeEnough(result.images[0], size))) {
-      fail(job, { code: "UPSCALE_TOO_SMALL", publicMessage: "生成渠道没有返回更高分辨率的图片，本次点数已退回。",
-        detail: `asked for ${size}, channel #${channel.id} returned a smaller image` });
-      log.warn(`Generation ${job.id}: channel #${channel.id} ignored the 超分 size ${size}`);
-      return;
+    // What really came back: some relays take the size and answer a 1024-class
+    // image. A 2K or 4K job that got under 80% of its pixels holds the channel to
+    // what it delivered; a 超分 that came back no larger isn't one.
+    const got = await imageDims(result.images[0]);
+    const delivered = got ? `${got[0]}x${got[1]}` : result.size && result.size !== "auto" ? result.size : size;
+    const wanted = dims(size);
+    const short = job.tier !== "standard" && !!got && !!wanted && got[0] * got[1] < wanted[0] * wanted[1] * 0.8;
+    if (short) {
+      channels.limitSizes(channel.id, { pixels: got[0] * got[1], requested: size, delivered });
+      log.warn(`Generation ${job.id}: channel #${channel.id} answered ${size} with ${delivered}`);
+      if (job.upscale_of) {
+        fail(job, { code: "UPSCALE_TOO_SMALL", publicMessage: "生成渠道没有返回更高分辨率的图片，本次点数已退回。",
+          detail: `asked for ${size}, channel #${channel.id} returned ${delivered}` });
+        return;
+      }
     }
     try {
       const save = job.kind === "asset" ? assetJobs.saveResults : saveResults;
-      await save(job, result, channel, result.size && result.size !== "auto" ? result.size : size);
+      await save(job, result, channel, delivered, short);
     } catch (err) {
       log.error(`Generation ${job.id}: saving the result from channel #${channel.id} failed`, err);
       fail(job, { code: "SAVE_FAILED", publicMessage: PUBLIC_MESSAGES.internal, detail: err.stack || err.message });

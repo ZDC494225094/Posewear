@@ -7,7 +7,7 @@ export async function render() {
   const safety = await settingsForm("safety", [
     { heading: "素材分级" },
     { key: "showSuggestive", label: "素材库显示“敏感”级素材", type: "switch", help: "敏感级：性感姿势、内衣、泳装等。" },
-    { key: "suggestiveForAI", label: "允许敏感级素材用于 AI 生成", type: "switch", help: "无论如何设置，敏感级素材都不能与人物照片同时使用。" },
+    { key: "suggestiveForAI", label: "允许敏感级素材用于 AI 生成", type: "switch", help: "敏感级姿势可以搭配真人照片；敏感级服装、场景和物品不能。" },
     { key: "showExplicit", label: "向已登录用户显示“限制”级素材", type: "switch", help: "限制级素材（双人亲密体位等）只能浏览，永远不会发送给模型。运营地区法律不允许时请保持关闭。" },
     { heading: "人物照片" },
     { key: "personRetentionDays", label: "人物照片保留天数", type: "number", min: 1, max: 365, help: "到期自动删除文件。" },
@@ -27,7 +27,7 @@ export async function render() {
   ], { title: "内容安全", after: refreshPreview });
   return h("div",
     pageHead("内容安全", "素材分级、人物照片、违禁词、AI 生成标识和广场审核。"),
-    h("p.a-callout.small", "以下规则写在代码里，不能关闭：限制级素材不会发给模型；使用人物照片时只能搭配普通级姿势和服装，且不能搭配双人姿势；使用人物照片的作品不能公开或推荐；上传人物照片必须勾选授权声明。"),
+    h("p.a-callout.small", "以下规则写在代码里，不能关闭：限制级素材不会发给模型；使用真人照片时不能搭配敏感级服装、场景和物品，也不能搭配双人姿势（敏感级姿势可以用）；使用人物照片的作品不能公开或推荐；上传人物照片必须勾选授权声明。"),
     safety,
     section("水印预览", "保存后刷新。如果文字显示为方框，说明服务器缺少中文字体（Docker 镜像已内置；Linux 主机请安装 fonts-noto-cjk）。", preview));
 }

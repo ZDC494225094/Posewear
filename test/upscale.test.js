@@ -59,18 +59,18 @@ test("an image is redrawn at 4K as a new work that keeps the source's references
   assert.equal(`${image.width}x${image.height}`, "1024x1536");
   assert.deepEqual(image.upscale, { hd: "1536x2304", uhd: "2336x3504" });
   const cfg = (await user.get("/api/public/config")).data.generation.upscale;
-  assert.deepEqual(cfg, { enabled: true, hdCredits: 20, uhdCredits: 45 });
+  assert.deepEqual(cfg, { enabled: true, targets: ["hd", "uhd"], hdCredits: 10, uhdCredits: 17 });
 
   const before = await balance(user);
   const res = await user.post(`/api/generations/${source.id}/upscale`, { imageId: image.id, target: "uhd" });
   assert.equal(res.status, 201, JSON.stringify(res.data));
   const job = res.data.generation;
-  assert.equal(job.cost, 45);
+  assert.equal(job.cost, 17);
   assert.equal(job.assetFee, 0);
   assert.equal(job.upscaleOf, image.id);
   assert.equal(job.tier, "uhd");
   assert.equal(job.size, "2336x3504");
-  assert.equal(await balance(user), before - 45);
+  assert.equal(await balance(user), before - 17);
 
   const done = await finished(user, job.id);
   assert.equal(done.status, "succeeded", done.errorMessage);
@@ -92,7 +92,7 @@ test("an image is redrawn at 4K as a new work that keeps the source's references
   const again = await user.post(`/api/generations/${done.id}/upscale`, { imageId: done.images[0].id, target: "hd" });
   assert.equal(again.status, 400);
   assert.equal(again.data.error.code, "ALREADY_LARGE");
-  assert.equal(await balance(user), before - 45);
+  assert.equal(await balance(user), before - 17);
 });
 
 test("only the owner can upscale, and only images of that work", async () => {
@@ -128,11 +128,11 @@ test("a channel that ignores the size gets the upscale refunded", async () => {
     const before = await balance(user);
     const res = await user.post(`/api/generations/${source.id}/upscale`, { imageId: source.images[0].id, target: "hd" });
     assert.equal(res.status, 201, JSON.stringify(res.data));
-    assert.equal(await balance(user), before - 20);
+    assert.equal(await balance(user), before - 10);
     const done = await finished(user, res.data.generation.id);
     assert.equal(done.status, "failed");
     assert.equal(done.errorCode, "UPSCALE_TOO_SMALL");
-    assert.equal(done.refunded, 20);
+    assert.equal(done.refunded, 10);
     assert.equal(done.images.length, 0);
     assert.equal(await balance(user), before);
   } finally {

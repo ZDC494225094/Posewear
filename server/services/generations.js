@@ -171,7 +171,7 @@ function libraryRef(id, type, { viewer, withPerson, gone, label }) {
   if (!library.accessible(asset, viewer)) throw forbidden(`这个${label}需要充值解锁后才能使用`, "LIBRARY_LOCKED");
   if (!library.usableForAI(asset, { withPerson })) {
     const code = `${type.toUpperCase()}_NOT_ALLOWED${withPerson ? "_WITH_PERSON" : ""}`;
-    throw badRequest(code, withPerson ? `使用真人照片时只能搭配普通级${label}，请换一个或移除人物照片` : `该${label}仅供浏览，不能用于 AI 生成`);
+    throw badRequest(code, withPerson ? `使用真人照片时不能搭配敏感级${label}，请换一个或移除人物照片` : `该${label}仅供浏览，不能用于 AI 生成`);
   }
   return asset;
 }
@@ -266,6 +266,10 @@ export function create(user, input, { ip }) {
   if (!channels.hasUsableChannel()) {
     throw new HttpError(503, "NO_CHANNEL", "生成服务尚未配置完成，请联系管理员");
   }
+  if (r.tier !== "standard" && !channels.tierAvailable(r.tier)) {
+    const label = r.gen.tiers.find((t) => t.id === r.tier)?.label || r.tier;
+    throw new HttpError(503, "TIER_UNSUPPORTED", `当前的生成渠道出不了「${label}」的尺寸，请选择更低的清晰度`);
+  }
   checkCaps(user, r.gen);
 
   const cost = creditCost(r) + r.assetFee;
@@ -304,9 +308,6 @@ export function create(user, input, { ip }) {
 
 const UPSCALE_TEXT = { hd: "2K", uhd: "4K" };
 
-// Only channels that take custom sizes can draw at 2K or 4K.
-export const canUpscaleOn = (channel) => channel.kind === "mock" || channel.options.sizeMode === "flexible";
-
 // Redraw one image of a finished work at 2K or 4K. The result is a new work
 // that keeps the source's references, person kind and admin hiding, so it is
 // shared (or kept private) on the same terms; it costs the 超分 price and no
@@ -324,8 +325,8 @@ export function upscale(user, generationId, input, { ip }) {
   if (source.person_kind === "real" && !gen.allowPersonPhoto) throw forbidden("当前未开放人物照片功能", "PERSON_DISABLED");
   const size = upscaleSize(image.width, image.height, target);
   if (!size) throw badRequest("ALREADY_LARGE", `这张图已经是${UPSCALE_TEXT[target]}或更大，不需要超分`);
-  if (!channels.enabledChannels().some((c) => (c.kind === "mock" || c.apiKey) && canUpscaleOn(c))) {
-    throw new HttpError(503, "UPSCALE_UNSUPPORTED", "当前的生成渠道不支持超分，请联系管理员");
+  if (!channels.tierAvailable(target)) {
+    throw new HttpError(503, "UPSCALE_UNSUPPORTED", `当前的生成渠道出不了 ${UPSCALE_TEXT[target]} 的尺寸，暂时不能超分到 ${UPSCALE_TEXT[target]}`);
   }
   checkCaps(user, gen);
 

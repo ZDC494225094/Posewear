@@ -318,7 +318,7 @@ export async function render(ctx) {
             h("dt", "张数"), h("dd.num", `${p.looks} 套 × ${perLook()} 张 = ${p.looks * perLook()} 张`),
             state.extra ? [h("dt", "加拍"), h("dd.num", `${state.extra * p.looks} 张 × ${catalog.extraPhotoPrice} 点`)] : null,
             h("dt", "免费重拍"), h("dd.num", `${p.retakes} 次`),
-            h("dt", "画质"), h("dd", "2K 高清原图")),
+            h("dt", "画质"), h("dd", p.photoText || "高清原图")),
           h("div.wd-receipt-total", h("span", "合计"), h("strong.num", price()), h("span", "点")),
           h("p.faint.small", `当前余额 ${number(balance)} 点${balance < price() ? `，还差 ${number(price() - balance)} 点` : ""}`),
           balance < price() ? h("a.btn.btn-white.btn-block", { href: "/pricing" }, cicon("gem", "orange"), "去充值") : null,

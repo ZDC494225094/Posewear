@@ -1,7 +1,9 @@
-// Output sizes per aspect ratio and resolution tier. Every value satisfies
-// gpt-image-2's custom-size rules: both sides multiples of 16, aspect ratio
-// within 1:3–3:1, longest edge ≤ 3840, total pixels 655,360–8,294,400.
-// "hd" stays within 2560×1440 worth of pixels; "uhd" is the experimental range.
+// Output sizes per aspect ratio and resolution tier. gpt-image-2 and
+// gpt-image-2.5 (Sunburst, Flare) take any WIDTHxHEIGHT within the same rules:
+// both sides multiples of 16, aspect ratio within 1:3–3:1, longest edge ≤ 3840,
+// total pixels 655,360–8,294,400 (= 3840×2160). OpenAI calls outputs above
+// 3,686,400 pixels (2560×1440) experimental. "hd" (2K) is the largest size of
+// each ratio at or under that line; "uhd" (4K) is near the cap, so experimental.
 export const SIZE_TABLE = {
   "1:1": { standard: [1024, 1024], hd: [1920, 1920], uhd: [2880, 2880] },
   "2:3": { standard: [1024, 1536], hd: [1536, 2304], uhd: [2336, 3504] },
@@ -11,6 +13,26 @@ export const SIZE_TABLE = {
   "9:16": { standard: [864, 1536], hd: [1440, 2560], uhd: [2160, 3840] },
   "16:9": { standard: [1536, 864], hd: [2560, 1440], uhd: [3840, 2160] }
 };
+
+export const EXPERIMENTAL_PIXELS = 2560 * 1440;
+
+export const TIER_RANK = { standard: 0, hd: 1, uhd: 2 };
+
+// The highest tier an image of this many pixels passes for: at least 80% of
+// that tier's size for the ratio (or, without a ratio, of its smallest size).
+export function tierOfPixels(pixels, ratio) {
+  const table = SIZE_TABLE[ratio];
+  const need = (tier) => (table ? table[tier][0] * table[tier][1]
+    : Math.min(...Object.values(SIZE_TABLE).map((s) => s[tier][0] * s[tier][1])));
+  return ["uhd", "hd"].find((tier) => pixels >= need(tier) * 0.8) || "standard";
+}
+
+export function dims(size) {
+  const m = /^(\d+)x(\d+)$/.exec(size || "");
+  return m ? [Number(m[1]), Number(m[2])] : null;
+}
+
+export const isExperimental = (size) => { const d = dims(size); return !!d && d[0] * d[1] > EXPERIMENTAL_PIXELS; };
 
 export function flexibleSize(ratio, tier) {
   const [w, h] = SIZE_TABLE[ratio]?.[tier] || SIZE_TABLE["1:1"].standard;

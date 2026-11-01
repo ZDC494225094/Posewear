@@ -598,6 +598,12 @@ const migrations = [
   // redraws at a higher resolution.
   `
   ALTER TABLE generations ADD COLUMN upscale_of TEXT;
+  `,
+  // 8: the most a channel really delivers. Some relays take a 2K or 4K size
+  // and answer with a 1024-class image; size_limit records that (JSON: maxTier,
+  // requested, delivered, at). Saving the channel in the admin clears it.
+  `
+  ALTER TABLE channels ADD COLUMN size_limit TEXT;
   `
 ];
 

@@ -1,4 +1,5 @@
 import express from "express";
+import sharp from "sharp";
 import { db, tx } from "../db.js";
 import * as settings from "../services/settings.js";
 import * as channels from "../services/channels.js";
@@ -17,7 +18,8 @@ import * as auth from "../services/auth.js";
 import * as worker from "../services/worker.js";
 import { providerFor, ProviderError } from "../services/providers/index.js";
 import { watermarkPreview, finalizeImage } from "../services/image-post.js";
-import { sizeForChannel } from "../services/sizes.js";
+import { sizeForChannel, flexibleSize, dims, isExperimental, tierOfPixels } from "../services/sizes.js";
+import { outputCostUsd } from "../services/pricing.js";
 import { sendMail, mailEnabled } from "../services/mailer.js";
 import { audit, listAudit } from "../services/audit.js";
 import { requireAdmin, uploadSingle } from "../middleware.js";
@@ -54,6 +56,28 @@ router.put("/admin/settings/:group", (req, res) => {
   if (group === "safety" || group === "library" || group === "assets") library.invalidate();
   audit(req, "settings.update", "settings", group);
   res.json({ group, value });
+});
+
+// 清晰度一览 for 生成与计费: each ratio's size at each tier, whether OpenAI calls
+// it experimental, and the estimated model cost of its output per quality.
+// The page works out the points from its own (unsaved) form values.
+router.get("/admin/generation/sizes", (req, res) => {
+  const gen = settings.get("generation");
+  const perPoint = billing.listPackages().map((p) => p.priceCents / 100 / p.totalCredits).filter((x) => x > 0);
+  res.json({
+    bestTier: channels.bestTier() || "standard",
+    usdToCny: gen.usdToCny,
+    yuanPerPoint: perPoint.length ? { min: Math.min(...perPoint), max: Math.max(...perPoint) } : null,
+    rows: settings.RATIOS.map((ratio) => ({
+      ratio, enabled: gen.ratios.includes(ratio),
+      tiers: Object.fromEntries(["standard", "hd", "uhd"].map((tier) => {
+        const size = flexibleSize(ratio, tier);
+        const [w, h] = dims(size);
+        return [tier, { size, pixels: w * h, experimental: isExperimental(size),
+          usd: Object.fromEntries(["low", "medium", "high"].map((q) => [q, outputCostUsd(size, q)])) }];
+      }))
+    }))
+  });
 });
 
 router.post("/admin/settings/mail/test", async (req, res) => {
@@ -95,13 +119,44 @@ router.delete("/admin/channels/:id", (req, res) => {
   res.json({ ok: true });
 });
 
-// "ping" lists models (free); "generate" makes one real low-quality image.
+const TIER_TEXT = { standard: "标准", hd: "2K", uhd: "4K" };
+
+// "ping" lists models (free); "generate" makes one real low-quality image;
+// "size" asks for one low-quality 4K image to see how large the channel really
+// draws, and records it (relays often take the size and answer 1024-class).
 router.post("/admin/channels/:id/test", async (req, res) => {
   const channel = channels.get(Number(req.params.id));
-  const mode = req.body?.mode === "generate" ? "generate" : "ping";
+  const mode = ["generate", "size"].includes(req.body?.mode) ? req.body.mode : "ping";
   const provider = providerFor(channel);
   if (mode === "ping") return res.json(await provider.ping(channel));
+  if (mode === "size" && channel.kind !== "mock" && channel.options.sizeMode !== "flexible") {
+    return res.json({ ok: false, message: "尺寸模式不是「自定义尺寸」，这个渠道只接标准清晰度。改成自定义尺寸并保存后再检测。" });
+  }
   const started = Date.now();
+  if (mode === "size") {
+    const size = flexibleSize("2:3", "uhd");
+    try {
+      const result = await provider.run(channel, {
+        prompt: "A small ceramic cup of green tea on a wooden table, soft daylight, simple product photo.",
+        images: [], size, quality: "low", n: 1, moderation: "auto", outputFormat: "png", outputCompression: 90,
+        safetyIdentifier: undefined, timeoutSec: settings.get("generation").requestTimeoutSec, timeoutScale: 2
+      });
+      channels.markSuccess(channel.id);
+      const meta = await sharp(result.images[0], { limitInputPixels: 80_000_000 }).metadata();
+      const delivered = `${meta.width}x${meta.height}`;
+      const tier = tierOfPixels(meta.width * meta.height, "2:3");
+      if (tier === "uhd") channels.clearSizeLimit(channel.id);
+      else channels.limitSizes(channel.id, { pixels: meta.width * meta.height, requested: size, delivered });
+      audit(req, "channel.size_check", "channel", channel.id, { requested: size, delivered });
+      return res.json({ ok: tier !== "standard", ms: Date.now() - started, tier,
+        message: tier === "uhd" ? `能出 4K：要 ${size.replace("x", "×")}，返回了 ${delivered.replace("x", "×")}。`
+          : `要 ${size.replace("x", "×")}，只返回了 ${delivered.replace("x", "×")}，这个渠道最高只能出${TIER_TEXT[tier]}。` });
+    } catch (err) {
+      const message = err instanceof ProviderError ? `${err.code || err.kind}：${err.message}` : err.message;
+      channels.markFailure(channel.id, message);
+      return res.json({ ok: false, ms: Date.now() - started, message: `检测失败：${message}` });
+    }
+  }
   try {
     const size = sizeForChannel("1:1", "standard", channel.options.sizeMode);
     const result = await provider.run(channel, {

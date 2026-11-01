@@ -2,6 +2,8 @@ import { db } from "../db.js";
 import { encryptSecret, decryptSecret, maskSecret } from "../lib/crypto.js";
 import { badRequest } from "../lib/errors.js";
 import { DEFAULT_LEGAL } from "./legal-defaults.js";
+import { bestTier } from "./channels.js";
+import { flexibleSize, TIER_RANK } from "./sizes.js";
 
 // Every operator-configurable value, grouped as the admin pages present them.
 // Stored per group as JSON overrides on top of these defaults.
@@ -90,9 +92,11 @@ export const DEFAULTS = {
       { id: "studio-strobe", label: "影棚闪光", prompt: "medium-format camera with studio strobes and a large softbox, crisp detail, soft controlled shadows" }
     ],
     // Redrawing a finished work at 2K or 4K through the same channel.
-    upscale: { enabled: true, quality: "medium", hdCredits: 20, uhdCredits: 45 },
+    // Priced like a studio image of the same size at 标准 (6 × 1.6, 6 × 2.8).
+    upscale: { enabled: true, quality: "medium", hdCredits: 10, uhdCredits: 17 },
     tokenPriceUsd: { textInput: 5, imageInput: 8, imageOutput: 30 },
-    fallbackCostUsd: { low: 0.006, medium: 0.053, high: 0.211 },
+    // gpt-image-1.5's 1024×1024 prices; gpt-image-2 and 2.5 are estimated by size (pricing.js).
+    fallbackCostUsd: { low: 0.009, medium: 0.034, high: 0.133 },
     usdToCny: 7.2
   },
   prompt: {
@@ -398,7 +402,7 @@ function presetList(list, fallback) {
   return out;
 }
 
-const RATIOS = ["2:3", "3:4", "1:1", "4:3", "3:2", "9:16", "16:9"];
+export const RATIOS = ["2:3", "3:4", "1:1", "4:3", "3:2", "9:16", "16:9"];
 
 function weddingPackages(list, fallback) {
   if (!Array.isArray(list)) return fallback;
@@ -659,6 +663,9 @@ export function publicBaseUrl(req) {
 export function publicConfig() {
   const site = get("site"), auth = get("auth"), gen = get("generation"), safety = get("safety"),
     payment = get("payment"), mail = get("mail"), library = get("library"), assets = get("assets");
+  // 2K and 4K (and 超分 to them) are offered only as far as some channel delivers.
+  const best = bestTier() || "standard";
+  const tiers = gen.tiers.filter((t) => t.enabled && TIER_RANK[t.id] <= TIER_RANK[best]);
   const providers = [];
   if (payment.alipay.enabled) providers.push("alipay");
   if (payment.wechat.enabled) providers.push("wechat");
@@ -681,13 +688,16 @@ export function publicConfig() {
       allowTextOnly: gen.allowTextOnly, allowOutfitUpload: gen.allowOutfitUpload,
       allowPersonPhoto: gen.allowPersonPhoto,
       qualities: gen.qualities.filter((q) => q.enabled).map(({ id, label, credits }) => ({ id, label, credits })),
-      tiers: gen.tiers.filter((t) => t.enabled).map(({ id, label, multiplier }) => ({ id, label, multiplier })),
+      tiers: tiers.map(({ id, label, multiplier }) => ({ id, label, multiplier })),
+      // Output size of every ratio at every offered tier, e.g. sizes["2:3"].hd = "1536x2304".
+      sizes: Object.fromEntries(gen.ratios.map((r) => [r, Object.fromEntries(tiers.map((t) => [t.id, flexibleSize(r, t.id)]))])),
       ratios: gen.ratios, defaultRatio: gen.defaultRatio, defaultQuality: gen.defaultQuality,
-      defaultTier: gen.defaultTier, maxN: gen.maxN,
+      defaultTier: tiers.some((t) => t.id === gen.defaultTier) ? gen.defaultTier : "standard", maxN: gen.maxN,
       styles: gen.styles.map(({ id, label }) => ({ id, label })),
       scenes: gen.scenes.map(({ id, label }) => ({ id, label })),
       cameras: gen.cameras.map(({ id, label }) => ({ id, label })),
-      upscale: { enabled: gen.upscale.enabled, hdCredits: gen.upscale.hdCredits, uhdCredits: gen.upscale.uhdCredits },
+      upscale: { enabled: gen.upscale.enabled && best !== "standard", targets: ["hd", "uhd"].filter((t) => TIER_RANK[t] <= TIER_RANK[best]),
+        hdCredits: gen.upscale.hdCredits, uhdCredits: gen.upscale.uhdCredits },
       maxItems: MAX_ITEMS,
       personRetentionDays: safety.personRetentionDays
     },

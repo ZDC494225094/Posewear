@@ -182,6 +182,7 @@ body[data-page="studio"] .header-row.wrap { width: calc(100% - 64px); }
 .realism-switch { align-items: flex-start; }
 .realism-switch .switch-text { display: grid; gap: 1px; }
 .realism-switch small { color: var(--label-3); font-size: 12px; font-weight: 400; line-height: 1.45; }
+.tier-size { margin-top: 8px; line-height: 1.5; font-variant-numeric: tabular-nums; }
 .panel-sec { display: grid; gap: 10px; }
 .panel-sec-head { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
 .panel-sec-head .tile { width: 22px; height: 22px; border-radius: 6px; }

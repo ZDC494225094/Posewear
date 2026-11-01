@@ -83,7 +83,11 @@ test("library hides explicit assets and marks AI usability", async () => {
   const poses = await user.get("/api/library/poses?view=image");
   const sexy = poses.data.items.find((p) => p.id === "sexy_P002_front");
   assert.equal(sexy.ai, true);
-  assert.equal(sexy.aiWithPerson, false);
+  assert.equal(sexy.aiWithPerson, true, "suggestive poses may go with a real person");
+  const outfits = await user.get("/api/library/outfits?size=50");
+  const lingerie = outfits.data.items.find((o) => o.id === "LNG-0001");
+  assert.equal(lingerie.ai, true);
+  assert.equal(lingerie.aiWithPerson, false, "suggestive outfits may not");
 });
 
 test("generation with pose + outfit calls /images/edits and stores a labelled PNG", async () => {
@@ -147,7 +151,7 @@ test("banned words are rejected before charging", async () => {
   assert.equal(await balance(user), before);
 });
 
-test("person photos need consent and only combine with general-rated references", async () => {
+test("person photos need consent, go with suggestive poses but not suggestive outfits", async () => {
   const png = await sharp({ create: { width: 600, height: 800, channels: 3, background: { r: 180, g: 150, b: 140 } } }).png().toBuffer();
   const form = () => {
     const f = new FormData();
@@ -164,9 +168,14 @@ test("person photos need consent and only combine with general-rated references"
   assert.equal(ok.status, 201, JSON.stringify(ok.data));
   const personUploadId = ok.data.upload.id;
 
+  // Suggestive poses may go with a real person; the prompt still asks for a clothed, non-sexualised picture.
   const suggestive = await user.post("/api/generations", { poseId: "sexy_P002_front", personUploadId, quality: "low" });
-  assert.equal(suggestive.status, 400);
-  assert.equal(suggestive.data.error.code, "POSE_NOT_ALLOWED_WITH_PERSON");
+  assert.equal(suggestive.status, 201, JSON.stringify(suggestive.data));
+  assert.equal((await poll(user, suggestive.data.generation.id)).status, "succeeded");
+  assert.match(fake.requests.at(-1).fields.prompt, /fully clothed in the outfit, in a natural and non-sexualised way/);
+  const picker = await user.get("/api/library/poses?view=image&size=50");
+  const sexy = picker.data.items.flatMap((g) => g.images || [g]).find((a) => a.id === "sexy_P002_front");
+  assert.ok(sexy && sexy.ai && sexy.aiWithPerson, "the picker marks the suggestive pose usable with a person");
   const lingerie = await user.post("/api/generations", { poseId: "std_P001_front", outfitId: "LNG-0001", personUploadId, quality: "low" });
   assert.equal(lingerie.data.error.code, "OUTFIT_NOT_ALLOWED_WITH_PERSON");
   const explicit = await user.post("/api/generations", { poseId: "pair_P003_front", quality: "low" });

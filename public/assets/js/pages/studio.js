@@ -198,7 +198,7 @@ export async function render(ctx) {
       itemsRef()) : null);
     ruleEl.textContent = !state.person
       ? "每一项都可以不选；都不选时，用文字描述也能生成。"
-      : real ? "已添加真人照片：只能搭配普通级素材，作品仅自己可见。"
+      : real ? "已添加真人照片：不能搭配内衣、泳装等敏感级服装和双人姿势，作品仅自己可见。"
         : "已添加虚拟人：可以搭配任意姿势、服装、场景和物品，作品可以公开。";
   }
 
@@ -327,7 +327,7 @@ export async function render(ctx) {
             ? h("ul.person-tips",
               h("li", tile("lock", "blue"), "照片只用于你发起的生成任务，并发送给图像模型服务商处理。"),
               h("li", tile("clock", "orange"), `照片会在 ${cfg.personRetentionDays} 天后自动删除，也可以随时手动删除。`),
-              h("li", tile("shield", "green"), "使用真人照片时，只能搭配普通级的素材，作品不能公开发布。"))
+              h("li", tile("shield", "green"), "使用真人照片时，不能搭配内衣、泳装等敏感级服装和双人姿势，作品不能公开发布。"))
             : h("ul.person-tips",
               h("li", tile("sparkle", "purple"), "虚拟人是 AI 生成或原创的角色形象，不是真实存在的人。"),
               h("li", tile("shield", "green"), "提交后由管理员审核，通过后可以搭配任意姿势和服装，作品可以公开。"),
@@ -473,6 +473,15 @@ export async function render(ctx) {
     return Math.ceil((qq?.credits || 0) * (t?.multiplier || 1));
   }
 
+  // The pixel size the chosen ratio and tier produce.
+  function tierNote() {
+    const size = cfg.sizes?.[state.ratio]?.[state.tier];
+    if (!size) return null;
+    const [width, height] = size.split("x").map(Number);
+    return h("p.small.faint.tier-size", `输出 ${width} × ${height}，约 ${Math.round((width * height) / 10000)} 万像素`,
+      width * height > 2560 * 1440 ? "。4K 是实验性尺寸，效果可能不稳定，出图也更慢" : "");
+  }
+
   function renderSettings() {
     replace(settingsEl,
       h("section.panel-sec", sectionHead("text", "gray", "画面描述", counter), promptInput),
@@ -493,7 +502,8 @@ export async function render(ctx) {
             onclick: () => { state.ratio = r; update(); } }, ratioShape(r), r)))),
       cfg.tiers.length > 1 ? h("section.panel-sec", sectionHead("expand", "blue", "清晰度"),
         seg("清晰度", cfg.tiers.map((t) => ({ value: t.id, content: [t.label, t.multiplier !== 1 ? h("span.chip-note", `×${t.multiplier}`) : null] })),
-          state.tier, (v) => { state.tier = v; update(); })) : null,
+          state.tier, (v) => { state.tier = v; update(); }),
+        tierNote()) : null,
       h("section.panel-sec", sectionHead("gem", "orange", "画质"),
         seg("画质", cfg.qualities.map((x) => ({ value: x.id, content: [x.label, h("span.chip-note", `${x.credits} 点`)] })),
           state.quality, (v) => { state.quality = v; update(); })),

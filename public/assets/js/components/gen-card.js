@@ -281,7 +281,7 @@ function upscaleSection(gen, img, { close, onCreated }) {
   const cfg = store.config.generation.upscale;
   const allowPerson = store.config.generation.allowPersonPhoto || gen.personKind !== "real";
   if (!cfg?.enabled || !allowPerson || gen.status !== "succeeded" || !img.upscale) return null;
-  const options = [["hd", cfg.hdCredits], ["uhd", cfg.uhdCredits]].filter(([target]) => img.upscale[target]);
+  const options = [["hd", cfg.hdCredits], ["uhd", cfg.uhdCredits]].filter(([target]) => img.upscale[target] && (cfg.targets || []).includes(target));
   if (!options.length) return null;
   async function run(target, cost) {
     const label = UPSCALE_TEXT[target];
@@ -341,6 +341,7 @@ export function openViewer(gen, start = 0, { onChange, onCreated } = {}) {
         gen.refs?.license ? h("p.small.muted", gen.refs.license === "commercial"
           ? "用到的素材均可商用。" : "用到了非商用素材，这张图仅限个人非商业用途。") : null,
         h("p.small.faint", `${item.img.width} × ${item.img.height} · ${item.img.format.toUpperCase()}`),
+        gen.status === "succeeded" && gen.errorMessage ? h("p.small.muted", gen.errorMessage) : null,
         upscaleSection(gen, item.img, { close, onCreated }),
         h("div.viewer-actions",
           h("a.btn.btn-primary.btn-block", { href: item.img.download, download: "", "data-native": "" }, cicon("download", "green"), "下载原图"),

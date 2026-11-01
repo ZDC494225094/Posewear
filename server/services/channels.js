@@ -1,6 +1,7 @@
 import { db } from "../db.js";
 import { encryptSecret, decryptSecret, maskSecret } from "../lib/crypto.js";
 import { badRequest, notFound } from "../lib/errors.js";
+import { TIER_RANK, tierOfPixels } from "./sizes.js";
 
 // A channel is one way to reach an image model: an API key plus base URL and
 // model id. Several channels give failover; the worker tries them by priority.
@@ -74,7 +75,9 @@ export function hydrate(r) {
   try { options = JSON.parse(r.options || "{}"); } catch { /* defaults */ }
   let apiKey = "";
   try { apiKey = decryptSecret(r.api_key_enc); } catch { apiKey = ""; }
-  return { ...r, enabled: !!r.enabled, options: cleanOptions(options), apiKey };
+  let sizeLimit = null;
+  try { sizeLimit = r.size_limit ? JSON.parse(r.size_limit) : null; } catch { /* none */ }
+  return { ...r, enabled: !!r.enabled, options: cleanOptions(options), apiKey, sizeLimit };
 }
 
 export function adminDto(r) {
@@ -85,6 +88,7 @@ export function adminDto(r) {
     apiKey: { __secret: true, set: !!c.apiKey, hint: maskSecret(c.apiKey) },
     successCount: c.success_count, failureCount: c.failure_count,
     lastOkAt: c.last_ok_at, lastError: c.last_error, lastErrorAt: c.last_error_at,
+    maxTier: maxTier(c), sizeLimit: c.sizeLimit,
     createdAt: c.created_at, updatedAt: c.updated_at
   };
 }
@@ -139,8 +143,9 @@ export function create(input) {
 export function update(id, input) {
   const existing = row(id);
   const c = validate(input, existing);
+  // Saving also clears what the size check learned, so a changed relay is checked again.
   db.prepare(`UPDATE channels SET name = ?, kind = ?, base_url = ?, api_key_enc = ?, model = ?, options = ?,
-    enabled = ?, priority = ?, updated_at = ? WHERE id = ?`).run(c.name, c.kind, c.baseUrl,
+    enabled = ?, priority = ?, size_limit = NULL, updated_at = ? WHERE id = ?`).run(c.name, c.kind, c.baseUrl,
     keyFromInput(input, existing), c.model, JSON.stringify(c.options), c.enabled ? 1 : 0, c.priority, Date.now(), id);
   return adminDto(row(id));
 }
@@ -161,4 +166,43 @@ export function markFailure(id, message) {
 
 export function hasUsableChannel() {
   return db.prepare("SELECT 1 FROM channels WHERE enabled = 1 AND (kind = 'mock' OR api_key_enc <> '') LIMIT 1").get() !== undefined;
+}
+
+// The highest tier a channel can deliver. 2K and 4K need custom sizes
+// (gpt-image-2, gpt-image-2.5); the fixed sizes of gpt-image-1.5 and 1-mini and
+// "auto" stay at 1024-class images. A relay that answered a larger size with a
+// smaller image is held to what it delivered (size_limit) until it is saved.
+export function maxTier(channel) {
+  if (channel.kind === "mock") return "uhd";
+  if (channel.options.sizeMode !== "flexible") return "standard";
+  return channel.sizeLimit?.maxTier || "uhd";
+}
+
+export const serves = (channel, tier) => TIER_RANK[tier] <= TIER_RANK[maxTier(channel)];
+
+// The highest tier any usable channel delivers; null without a usable channel.
+export function bestTier() {
+  let best = null;
+  const rows = db.prepare("SELECT kind, options, size_limit FROM channels WHERE enabled = 1 AND (kind = 'mock' OR api_key_enc <> '')").all();
+  for (const r of rows) {
+    let options = {}, sizeLimit = null;
+    try { options = JSON.parse(r.options || "{}"); } catch { /* defaults */ }
+    try { sizeLimit = r.size_limit ? JSON.parse(r.size_limit) : null; } catch { /* none */ }
+    const tier = maxTier({ kind: r.kind, options: cleanOptions(options), sizeLimit });
+    if (best === null || TIER_RANK[tier] > TIER_RANK[best]) best = tier;
+  }
+  return best;
+}
+
+export const tierAvailable = (tier) => { const best = bestTier(); return best !== null && TIER_RANK[tier] <= TIER_RANK[best]; };
+
+export function clearSizeLimit(id) {
+  db.prepare("UPDATE channels SET size_limit = NULL WHERE id = ?").run(id);
+}
+
+// A channel answered `requested` with a smaller image: hold it to the tier it delivered.
+export function limitSizes(id, { pixels, requested, delivered }) {
+  const sizeLimit = { maxTier: tierOfPixels(pixels), requested, delivered, at: Date.now() };
+  db.prepare("UPDATE channels SET size_limit = ? WHERE id = ?").run(JSON.stringify(sizeLimit), id);
+  return sizeLimit;
 }

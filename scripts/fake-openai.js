@@ -7,8 +7,9 @@
 //
 // Put "[fake:moderation]", "[fake:503]", "[fake:quota]" or "[fake:param]" in a
 // prompt to simulate the corresponding upstream error, "[fake:slow]" for a
-// response that takes 1.5 s, or "[fake:1k]" for a relay that ignores the
-// requested size and always answers 1024×1024.
+// response that takes 1.5 s, "[fake:1k]" for a relay that ignores the
+// requested size and always answers 1024×1024, or "[fake:nousage]" for a relay
+// that returns no token usage.
 import http from "node:http";
 import { pathToFileURL } from "node:url";
 import sharp from "sharp";
@@ -100,7 +101,8 @@ export function createFakeOpenAI({ log = false } = {}) {
     }
     json(res, 200, {
       created: Math.floor(Date.now() / 1000), data, size: fields.size, quality: fields.quality, output_format: "png",
-      usage: { input_tokens: 1500, input_tokens_details: { text_tokens: 300, image_tokens: 1200 }, output_tokens: 6000, total_tokens: 7500 }
+      usage: prompt.includes("[fake:nousage]") ? undefined
+        : { input_tokens: 1500, input_tokens_details: { text_tokens: 300, image_tokens: 1200 }, output_tokens: 6000, total_tokens: 7500 }
     });
   });
   return { server, requests };

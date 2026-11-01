@@ -5,6 +5,7 @@ import { dateTime, number } from "../../core/format.js";
 import { pageHead, section, form, drawer, statusPill } from "../kit.js";
 
 const SIZE_MODES = [["flexible", "自定义尺寸（gpt-image-2 / 2.5）"], ["fixed", "固定三档（gpt-image-1.5 及更早）"], ["auto", "交给模型决定（auto）"]];
+const TIER_TEXT = { standard: "标准", hd: "2K", uhd: "4K" };
 const FIDELITY = [["omit", "不发送（gpt-image-2 必须选这个）"], ["high", "high"], ["low", "low"]];
 
 function channelFields(kind, models) {
@@ -23,7 +24,8 @@ function channelFields(kind, models) {
     { key: "apiKey", label: "API Key", type: "secret", placeholder: "sk-..." },
     { key: "model", label: "模型 ID", placeholder: "gpt-image-2",
       help: `常用：${models.map((m) => m.id).join("、")}。也可以填中转站自定义的模型名。` },
-    { key: "options.sizeMode", label: "尺寸模式", type: "select", options: SIZE_MODES },
+    { key: "options.sizeMode", label: "尺寸模式", type: "select", options: SIZE_MODES,
+      help: "2K、4K 作品、婚纱照和超分只发给「自定义尺寸」的渠道；固定三档和 auto 只接标准清晰度。中转返回的图比要求的小时，会自动标记这个渠道，并按实际清晰度给用户退差价。" },
     { key: "options.inputFidelity", label: "input_fidelity 参数", type: "select", options: FIDELITY },
     { key: "priority", label: "优先级", type: "number", help: "数字越大越先使用。失败时自动切到下一个渠道。" },
     { key: "options.maxConcurrency", label: "最大并发", type: "number", min: 0, max: 100, help: "0 表示不限制。用来避开账号的速率限制（每分钟图片数）。" },
@@ -94,6 +96,14 @@ export async function render() {
         if (mode === "generate") load();
       } catch (err) { toastError(err); }
     });
+    // The result changes what the card says about the channel, so reload after it.
+    const sizeCheck = (e) => busy(e.currentTarget, async () => {
+      try {
+        const r = await api.post(`/api/admin/channels/${c.id}/test`, { mode: "size" });
+        toast(r.message, { type: r.ok ? "success" : "error" });
+        await load();
+      } catch (err) { toastError(err); }
+    });
     return h("article.channel-card", { class: c.enabled ? "" : "is-off" },
       h("div.channel-main",
         h("div.channel-title", h("h3", c.name), c.enabled ? statusPill("已启用", "mat") : statusPill("已停用"), c.kind === "mock" ? statusPill("模拟", "tape") : null),
@@ -101,12 +111,16 @@ export async function render() {
         c.kind === "openai" ? h("p.small", "API Key：", c.apiKey.set ? h("code", c.apiKey.hint) : h("strong.text-pin", "未设置")) : null,
         h("p.small.faint", `优先级 ${c.priority} · 成功 ${number(c.successCount)} 次 · 失败 ${number(c.failureCount)} 次`,
           c.lastOkAt ? ` · 最近成功 ${dateTime(c.lastOkAt)}` : ""),
+        c.kind === "openai" ? h("p.small", "最高清晰度：", h("strong", TIER_TEXT[c.maxTier]),
+          c.sizeLimit ? h("span.text-pin", `（尺寸检测：要 ${c.sizeLimit.requested.replace("x", "×")} 时只返回了 ${c.sizeLimit.delivered.replace("x", "×")}，${dateTime(c.sizeLimit.at)}。换了中转或模型后保存一次渠道，会重新检测）`)
+            : c.options.sizeMode !== "flexible" ? h("span.faint", "（尺寸模式不是「自定义尺寸」）") : null) : null,
         c.lastError ? h("p.small.channel-error", { class: c.lastOkAt > c.lastErrorAt ? "is-recovered" : "" },
           `${c.lastOkAt > c.lastErrorAt ? "上次错误（之后已恢复）" : "最近错误"}（${dateTime(c.lastErrorAt)}）：${c.lastError}`) : null,
         result),
       h("div.channel-actions",
         h("button.btn.btn-sm", { type: "button", onclick: test("ping") }, "测试连接"),
         c.kind === "openai" ? h("button.btn.btn-sm", { type: "button", title: "生成一张低画质测试图，会产生少量费用", onclick: test("generate") }, "试生成一张") : null,
+        c.kind === "openai" ? h("button.btn.btn-sm", { type: "button", title: "按 4K 尺寸生成一张低画质测试图，看渠道实际返回多大的图，结果会记到渠道上。会产生一次生成的费用", onclick: sizeCheck }, "检测 2K / 4K") : null,
         h("button.btn.btn-sm.btn-primary", { type: "button", onclick: () => editChannel(c, models, load) }, "编辑"),
         h("button.btn.btn-sm.btn-ghost", { type: "button", onclick: async () => {
           try { await api.put(`/api/admin/channels/${c.id}`, { enabled: !c.enabled }); load(); } catch (err) { toastError(err); }
@@ -124,8 +138,8 @@ export async function render() {
         h("button.btn.btn-primary", { type: "button", onclick: () => editChannel({ kind: "openai" }, models, load) }, "添加 OpenAI 渠道")]),
     list,
     section("接入说明", null, h("ul.a-notes.small",
-      h("li", "推荐模型 gpt-image-2：支持自定义尺寸（边长为 16 的倍数，最长 3840 像素），参考图默认按高保真处理，因此 input_fidelity 必须选“不发送”。"),
+      h("li", "模型：gpt-image-2，或 gpt-image-2.5-sunburst（画质更好）、gpt-image-2.5-flare（更快，画质接近 gpt-image-2）。三者都支持自定义尺寸：宽高是 16 的倍数，长宽比在 1:3 到 3:1 之间，最长边 3840 像素，总像素 65.5 万到 829 万；超过 2560×1440 的尺寸官方标为实验性。参考图始终按高保真处理，input_fidelity 选“不发送”。"),
       h("li", "使用 OpenAI 官方接口前，组织可能需要先在开发者后台完成 Organization Verification。"),
-      h("li", "“测试连接”调用 /v1/models，不产生费用；“试生成一张”会生成一张 1024×1024 低画质图片，费用约 0.006 美元。"),
+      h("li", "“测试连接”调用 /v1/models，不产生费用；“试生成一张”会生成一张 1024×1024 低画质图片，官方价约 0.006 美元；“检测 2K / 4K”按 2336×3504 生成一张低画质图片（官方价约 0.01 美元），看渠道实际返回多大的图。不少中转站会忽略尺寸、只返回 1024 级别的图，这样的渠道只接标准清晰度。"),
       h("li", "API Key 用 APP_SECRET 加密后保存在数据库，后台只显示首尾几位。"))));
 }

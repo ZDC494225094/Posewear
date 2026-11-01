@@ -60,6 +60,12 @@ body.admin #main { padding-bottom: 60px; min-height: 100vh; }
 .a-field > label { font-size: 13px; font-weight: 600; color: var(--label); }
 .a-field small { color: var(--label-3); font-size: 12.5px; line-height: 1.5; }
 .a-field.is-wide { grid-column: 1 / -1; }
+.size-overview { display: grid; gap: 10px; }
+.size-overview-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.size-overview-head .seg { width: 240px; }
+.size-overview .a-callout { margin: 0; }
+.size-cell { display: grid; gap: 2px; min-width: 150px; }
+.size-cell-size { display: flex; align-items: center; gap: 6px; font-weight: 600; }
 .a-field.is-switch { align-content: center; }
 .a-form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 .sticky-actions { position: sticky; bottom: 0; padding: 14px 0; background: linear-gradient(rgba(245, 245, 247, 0), var(--bg) 35%); }

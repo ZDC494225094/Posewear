@@ -150,7 +150,8 @@ export function catalog(viewer) {
   viewer = serviceViewer(viewer);
   return {
     enabled: c.enabled && settings.get("generation").enabled,
-    packages: c.packages.map((p) => ({ ...p, shots: Math.min(p.shots, c.shots.length), photos: p.looks * Math.min(p.shots, c.shots.length) })),
+    packages: c.packages.map((p) => ({ ...p, shots: Math.min(p.shots, c.shots.length), photos: p.looks * Math.min(p.shots, c.shots.length),
+      photoText: photoText(c) })),
     extraPhotoPrice: c.extraPhotoPrice, retakePrice: c.retakePrice, freeRetries: c.freeRetries, retentionDays: c.retentionDays,
     maxExtra: MAX_EXTRA, maxPhotos: MAX_PHOTOS, refsPerPerson: REFS_PER_PERSON,
     shots: c.shots.map(({ key, name, people, ratio }) => ({ key, name, people, ratio })),
@@ -293,6 +294,11 @@ function plan({ look, shot, bride = [], groom = [], virtual = false }) {
   return { prompt: lines.map((l) => String(l || "").trim()).filter(Boolean).join("\n"), inputs };
 }
 
+// The tier photos are made at: the configured one (2K by default) while a
+// channel delivers it, otherwise standard. Users are told which before ordering.
+const photoTier = (c) => (channels.tierAvailable(c.tier) ? c.tier : "standard");
+const photoText = (c) => (photoTier(c) === "standard" ? "高清原图" : "2K 高清原图");
+
 const insertJob = () => db.prepare(`INSERT INTO generations (id, user_id, status, kind, mode, shoot_id, params, person_kind,
   prompt_user, prompt_final, ratio, tier, size, quality, n, cost_credits, consent_at, client_ip, created_at)
   VALUES (?, ?, 'queued', 'work', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?)`);
@@ -306,7 +312,7 @@ function queuePhoto(shoot, photo, { ip = null } = {}) {
   const id = randomId(12);
   insertJob().run(id, shoot.user_id, built.inputs.length ? "edit" : "generate", shoot.id,
     JSON.stringify({ photoId: photo.id, look: photo.look, shot: shot.key, inputs: built.inputs }), "real", shot.name, built.prompt,
-    shot.ratio, c.tier, flexibleSize(shot.ratio, c.tier), c.quality, shoot.consent_at, ip, Date.now());
+    shot.ratio, photoTier(c), flexibleSize(shot.ratio, photoTier(c)), c.quality, shoot.consent_at, ip, Date.now());
   db.prepare("UPDATE wedding_photos SET generation_id = ?, updated_at = ? WHERE id = ?").run(id, Date.now(), photo.id);
   return id;
 }
@@ -710,7 +716,7 @@ export function generateSamples(admin, id, count = 2, { ip = null } = {}) {
       const jobId = randomId(12);
       insertJob().run(jobId, admin.id, built.inputs.length ? "edit" : "generate", `sample:${scene.id}`,
         JSON.stringify({ sample: true, sceneId: scene.id, shot: shot.key, inputs: built.inputs }), "none", `示例 · ${scene.name}`,
-        built.prompt, shot.ratio, c.tier, flexibleSize(shot.ratio, c.tier), c.quality, null, ip, Date.now());
+        built.prompt, shot.ratio, photoTier(c), flexibleSize(shot.ratio, photoTier(c)), c.quality, null, ip, Date.now());
       ids.push(jobId);
     }
   })();

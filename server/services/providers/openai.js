@@ -33,7 +33,7 @@ export async function run(channel, request) {
   const base = resolveBaseUrl(channel.base_url);
   const opts = channel.options;
   const omit = new Set(opts.omitParams);
-  const timeoutMs = (opts.timeoutSec || request.timeoutSec) * 1000;
+  const timeoutMs = (opts.timeoutSec || request.timeoutSec) * (request.timeoutScale || 1) * 1000;
 
   const fields = { model: channel.model, prompt: request.prompt };
   if (!omit.has("n")) fields.n = request.n;

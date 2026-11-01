@@ -34,7 +34,7 @@ export function packageCard(pkg, { selected = false, onSelect, action } = {}) {
     h("ul.wd-pkg-list",
       h("li", icon("check", 15), `${pkg.looks} 套造型，每套 ${pkg.shots} 个镜头`),
       h("li", icon("check", 15), `含 ${pkg.retakes} 次免费重拍`),
-      h("li", icon("check", 15), "2K 高清原图，整册打包下载")),
+      h("li", icon("check", 15), `${pkg.photoText || "高清原图"}，整册打包下载`)),
     pkg.description ? h("p.wd-pkg-desc", pkg.description) : null,
     action || null);
 }

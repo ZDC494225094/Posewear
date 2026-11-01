@@ -112,10 +112,12 @@ export function visible(asset, viewer = {}) {
 }
 
 // Hard rules, not settings: restricted assets never go to the model, and a real
-// person's photo may only be combined with general-rated references.
+// person's photo can't be combined with suggestive outfits, scenes or items.
+// Suggestive poses may go with a real person (the prompt still asks for a
+// clothed, non-sexualised picture of them).
 export function usableForAI(asset, { withPerson = false } = {}) {
   if (!asset || !asset.enabled || asset.rating === "explicit") return false;
-  if (asset.rating === "suggestive") return !withPerson && settings.get("safety").suggestiveForAI;
+  if (asset.rating === "suggestive") return settings.get("safety").suggestiveForAI && (!withPerson || asset.type === "pose");
   return true;
 }
 
