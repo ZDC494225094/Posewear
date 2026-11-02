@@ -8,12 +8,22 @@ import { priceCard, packagePerks } from "./home.js";
 import { unlockRule } from "../components/library-browser.js";
 
 const PROVIDERS = { alipay: "支付宝", wechat: "微信支付", mock: "模拟支付（测试）" };
+const EPAY_METHODS = { alipay: "支付宝", wxpay: "微信支付", qqpay: "QQ 钱包" };
 
 export async function render() {
   const cfg = store.config;
   let packages = [];
   try { packages = (await api.get("/api/billing/packages")).items; } catch (err) { toastError(err); }
-  const providers = cfg.payment.providers;
+  // 易支付 offers each of its methods as its own option ("epay:alipay"); named
+  // after the gateway when the same method is also connected directly.
+  const direct = new Set(cfg.payment.providers);
+  const providers = cfg.payment.providers.flatMap((p) => (p === "epay" ? (cfg.payment.epayTypes || []).map((t) => `epay:${t}`) : [p]));
+  const labelOf = (p) => {
+    if (!p.startsWith("epay:")) return PROVIDERS[p] || p;
+    const method = p.slice(5);
+    const same = (method === "alipay" && direct.has("alipay")) || (method === "wxpay" && direct.has("wechat"));
+    return `${EPAY_METHODS[method] || method}${same ? "（易支付）" : ""}`;
+  };
   let provider = providers[0] || "";
 
   async function buy(pkg, button) {
@@ -21,7 +31,8 @@ export async function render() {
     if (!provider) { toast("暂未开通在线支付，请使用兑换码充值", { type: "error" }); return; }
     await busy(button, async () => {
       try {
-        const { order } = await api.post("/api/billing/orders", { packageId: pkg.id, provider });
+        const [kind, method] = provider.split(":");
+        const { order } = await api.post("/api/billing/orders", { packageId: pkg.id, provider: kind, method });
         navigate(`/pay/${order.id}`);
       } catch (err) { toastError(err); }
     });
@@ -31,7 +42,7 @@ export async function render() {
     h("div.seg", { style: { maxWidth: "420px" } }, providers.map((p) => h("button", { type: "button", "aria-pressed": String(p === provider), onclick: (e) => {
       provider = p;
       e.currentTarget.parentElement.querySelectorAll("button").forEach((c) => c.setAttribute("aria-pressed", String(c === e.currentTarget)));
-    } }, PROVIDERS[p] || p)))) : providers.length === 1 ? h("p.small.muted.pay-methods", `支付方式：${PROVIDERS[providers[0]]}`) : null;
+    } }, labelOf(p))))) : providers.length === 1 ? h("p.small.muted.pay-methods", `支付方式：${labelOf(providers[0])}`) : null;
 
   const codeInput = h("input.input.input-filled.redeem-input", { placeholder: "XXXX-XXXX-XXXX-XXXX", autocomplete: "off", maxLength: 24, "aria-label": "兑换码" });
   const redeem = h("form.redeem", { onsubmit: async (e) => {

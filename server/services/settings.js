@@ -283,7 +283,9 @@ export const DEFAULTS = {
     orderExpireMinutes: 30,
     mock: { enabled: false },
     alipay: { enabled: false, sandbox: false, mode: "page", appId: "", privateKey: "", alipayPublicKey: "" },
-    wechat: { enabled: false, appId: "", mchId: "", serialNo: "", privateKey: "", apiV3Key: "", platformPublicKey: "", platformPublicKeyId: "" }
+    wechat: { enabled: false, appId: "", mchId: "", serialNo: "", privateKey: "", apiV3Key: "", platformPublicKey: "", platformPublicKeyId: "" },
+    // 易支付 (彩虹易支付 and compatible gateways), MD5 interface.
+    epay: { enabled: false, gateway: "", pid: "", key: "", mode: "page", types: ["alipay", "wxpay"] }
   },
   mail: {
     enabled: false, host: "", port: 465, secure: true, user: "", pass: "", from: ""
@@ -296,7 +298,7 @@ export const MAX_ITEMS = 3;
 
 // Dotted paths whose values are encrypted at rest and never sent back in full.
 const SECRET_PATHS = new Set([
-  "payment.alipay.privateKey", "payment.wechat.privateKey", "payment.wechat.apiV3Key", "mail.pass"
+  "payment.alipay.privateKey", "payment.wechat.privateKey", "payment.wechat.apiV3Key", "payment.epay.key", "mail.pass"
 ]);
 
 const isPlainObject = (v) => v && typeof v === "object" && !Array.isArray(v);
@@ -621,7 +623,7 @@ function sanitize(group, v) {
       };
     }
     case "payment": {
-      const a = v.alipay || {}, w = v.wechat || {};
+      const a = v.alipay || {}, w = v.wechat || {}, e = v.epay || {};
       return {
         orderExpireMinutes: intIn(v.orderExpireMinutes, 5, 1440, d.orderExpireMinutes),
         mock: { enabled: flag(v.mock?.enabled, false) },
@@ -638,6 +640,13 @@ function sanitize(group, v) {
           privateKey: text(w.privateKey, "", 8000), apiV3Key: text(w.apiV3Key, "", 64),
           platformPublicKey: text(w.platformPublicKey, "", 4000).trim(),
           platformPublicKeyId: text(w.platformPublicKeyId, "", 80).trim()
+        },
+        epay: {
+          enabled: flag(e.enabled, false),
+          gateway: text(e.gateway, "", 300).trim(),
+          pid: text(e.pid, "", 40).trim(), key: text(e.key, "", 200).trim(),
+          mode: pick(e.mode, ["page", "api"], "page"),
+          types: (Array.isArray(e.types) ? ["alipay", "wxpay", "qqpay"].filter((t) => e.types.includes(t)) : d.epay.types)
         }
       };
     }
@@ -679,6 +688,7 @@ export function publicConfig() {
   const providers = [];
   if (payment.alipay.enabled) providers.push("alipay");
   if (payment.wechat.enabled) providers.push("wechat");
+  if (payment.epay.enabled && payment.epay.types.length) providers.push("epay");
   if (payment.mock.enabled) providers.push("mock");
   return {
     site: {
@@ -714,7 +724,7 @@ export function publicConfig() {
       maxItems: MAX_ITEMS,
       personRetentionDays: safety.personRetentionDays
     },
-    payment: { providers },
+    payment: { providers, epayTypes: payment.epay.enabled ? payment.epay.types : [] },
     showcase: { enabled: safety.showcaseEnabled, realPersonPublic: safety.realPersonPublic, realPersonReview: safety.realPersonReview },
     wedding: { enabled: get("wedding").enabled && gen.enabled },
     library: { originalDownload: library.originalDownload, showSuggestive: safety.showSuggestive,

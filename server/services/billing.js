@@ -3,6 +3,7 @@ import * as settings from "./settings.js";
 import * as credits from "./credits.js";
 import * as alipay from "../payments/alipay.js";
 import * as wechat from "../payments/wechat.js";
+import * as epay from "../payments/epay.js";
 import { randomId, redeemCode } from "../lib/crypto.js";
 import { badRequest, conflict, forbidden, notFound } from "../lib/errors.js";
 import { enforce } from "../lib/rate-limit.js";
@@ -82,14 +83,15 @@ export function seedPackages() {
 
 // ---------- orders
 
-const PROVIDER_LABELS = { alipay: "支付宝", wechat: "微信支付", mock: "模拟支付", manual: "人工入账" };
+const PROVIDER_LABELS = { alipay: "支付宝", wechat: "微信支付", epay: "易支付", mock: "模拟支付", manual: "人工入账" };
 
 export function orderDto(o) {
   let pay = null;
   try { pay = o.pay_data ? JSON.parse(o.pay_data) : null; } catch { pay = null; }
   return {
     id: o.id, title: o.title, credits: o.credits, amountCents: o.amount_cents, currency: o.currency,
-    provider: o.provider, providerLabel: PROVIDER_LABELS[o.provider] || o.provider, status: o.status,
+    provider: o.provider, status: o.status,
+    providerLabel: o.provider === "epay" && pay?.method ? `${epay.METHODS[pay.method] || pay.method}（易支付）` : PROVIDER_LABELS[o.provider] || o.provider,
     pay: o.status === "pending" ? pay : null, paidAt: o.paid_at, expiresAt: o.expires_at, createdAt: o.created_at
   };
 }
@@ -103,13 +105,16 @@ function providerEnabled(provider) {
   const payment = settings.get("payment");
   if (provider === "alipay") return payment.alipay.enabled;
   if (provider === "wechat") return payment.wechat.enabled;
+  if (provider === "epay") return payment.epay.enabled;
   if (provider === "mock") return payment.mock.enabled;
   return false;
 }
 
-export async function createOrder(user, { packageId, provider }, { baseUrl }) {
+export async function createOrder(user, { packageId, provider, method }, { baseUrl, clientIp, device }) {
   enforce(`order:${user.id}`, 10, 10 * 60 * 1000, "下单太频繁，请稍后再试");
   if (!providerEnabled(provider)) throw badRequest("PROVIDER_DISABLED", "该支付方式暂未开放");
+  // 易支付 carries several methods (支付宝, 微信 …); the user picks one the admin turned on.
+  if (provider === "epay" && !settings.get("payment").epay.types.includes(method)) throw badRequest("PROVIDER_DISABLED", "该支付方式暂未开放");
   const pkg = db.prepare("SELECT * FROM packages WHERE id = ? AND enabled = 1").get(Number(packageId));
   if (!pkg) throw badRequest("PACKAGE_UNAVAILABLE", "套餐不存在或已下架");
   const pending = db.prepare("SELECT COUNT(*) AS n FROM orders WHERE user_id = ? AND status = 'pending' AND expires_at > ?")
@@ -136,6 +141,10 @@ export async function createOrder(user, { packageId, provider }, { baseUrl }) {
       });
     } else if (provider === "wechat") {
       pay = await wechat.create(payment.wechat, order, { notifyUrl: `${baseUrl}/api/pay/notify/wechat` });
+    } else if (provider === "epay") {
+      pay = await epay.create(payment.epay, order, {
+        notifyUrl: `${baseUrl}/api/pay/notify/epay`, returnUrl: `${baseUrl}/pay/${order.id}?from=return`, method, clientIp, device
+      });
     } else {
       pay = { type: "mock" };
     }
@@ -190,6 +199,7 @@ export async function refreshOrder(user, id) {
     let result = null;
     if (o.provider === "alipay" && payment.alipay.enabled) result = await alipay.query(payment.alipay, o);
     if (o.provider === "wechat" && payment.wechat.enabled) result = await wechat.query(payment.wechat, o);
+    if (o.provider === "epay" && payment.epay.enabled) result = await epay.query(payment.epay, o);
     if (result?.paid) markPaid(o.id, { tradeNo: result.tradeNo, amountCents: result.amountCents, source: `${o.provider}-query` });
   } catch (err) {
     log.warn(`Order query failed for ${o.id}: ${err.message}`);
@@ -217,6 +227,15 @@ export function handleWechatNotify(headers, rawBody) {
   const parsed = wechat.parseNotify(cfg, headers, rawBody);
   if (!parsed) { log.warn("WeChat Pay notify rejected: bad signature"); return false; }
   if (parsed.paid) markPaid(parsed.orderId, { tradeNo: parsed.tradeNo, amountCents: parsed.amountCents, source: "wechat-notify" });
+  return true;
+}
+
+// 易支付 notifications are signed with the merchant key; markPaid checks the amount.
+export function handleEpayNotify(params) {
+  const cfg = settings.get("payment").epay;
+  const parsed = epay.parseNotify(cfg, params);
+  if (!parsed) { log.warn("EPay notify rejected: bad signature or merchant id"); return false; }
+  if (parsed.paid) markPaid(parsed.orderId, { tradeNo: parsed.tradeNo, amountCents: parsed.amountCents, source: "epay-notify" });
   return true;
 }
 

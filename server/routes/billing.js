@@ -14,9 +14,10 @@ router.get("/billing/packages", (req, res) => {
 });
 
 router.post("/billing/orders", requireUser, async (req, res) => {
-  const provider = v.oneOf(req.body?.provider, "provider", ["alipay", "wechat", "mock"]);
-  const order = await billing.createOrder(req.user, { packageId: req.body?.packageId, provider },
-    { baseUrl: settings.publicBaseUrl(req) });
+  const provider = v.oneOf(req.body?.provider, "provider", ["alipay", "wechat", "epay", "mock"]);
+  const mobile = /Mobile|Android|iPhone/i.test(req.get("user-agent") || "");
+  const order = await billing.createOrder(req.user, { packageId: req.body?.packageId, provider, method: String(req.body?.method || "") },
+    { baseUrl: settings.publicBaseUrl(req), clientIp: req.ip, device: mobile ? "mobile" : "pc" });
   res.status(201).json({ order });
 });
 
@@ -54,6 +55,18 @@ notifyRouter.post("/pay/notify/alipay", express.urlencoded({ extended: false, li
     res.type("text/plain").send(ok ? "success" : "fail");
   } catch (err) {
     log.error("Alipay notify handling failed", err);
+    res.type("text/plain").send("fail");
+  }
+});
+
+// 易支付 calls notify_url with GET (some forks POST a form). Any non-"success"
+// answer makes it retry, so a rejected signature answers "fail".
+notifyRouter.all("/pay/notify/epay", express.urlencoded({ extended: false, limit: "64kb" }), (req, res) => {
+  try {
+    const params = { ...req.query, ...(req.method === "POST" && req.body && typeof req.body === "object" ? req.body : {}) };
+    res.type("text/plain").send(billing.handleEpayNotify(params) ? "success" : "fail");
+  } catch (err) {
+    log.error("EPay notify handling failed", err);
     res.type("text/plain").send("fail");
   }
 });

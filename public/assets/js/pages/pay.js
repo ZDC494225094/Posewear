@@ -4,6 +4,9 @@ import { store } from "../core/store.js";
 import { toast, toastError, busy, emptyState } from "../core/ui.js";
 import { yuan, number, dateTime } from "../core/format.js";
 
+// The app that scans a QR code, by provider or 易支付 method.
+const APP_OF = { alipay: "支付宝", wechat: "微信", wxpay: "微信", qqpay: "QQ" };
+
 export async function render(ctx) {
   const id = ctx.params.id;
   let order;
@@ -29,8 +32,9 @@ export async function render(ctx) {
       const pay = order.pay;
       body = h("div.pay-pending",
         pay.type === "qr" ? h("figure.pay-qr", h("img", { src: `/api/billing/orders/${order.id}/qr.svg`, alt: "支付二维码", width: 240, height: 240 }),
-          h("figcaption.small.muted", order.provider === "wechat" ? "请使用微信扫一扫完成支付" : "请使用支付宝扫一扫完成支付")) : null,
-        pay.type === "redirect" ? h("a.btn.btn-primary.btn-lg", { href: pay.url, "data-native": "" }, "前往支付宝付款") : null,
+          h("figcaption.small.muted", APP_OF[pay.method || order.provider] ? `请使用${APP_OF[pay.method || order.provider]}扫一扫完成支付` : "请扫码完成支付")) : null,
+        pay.type === "redirect" ? h("a.btn.btn-primary.btn-lg", { href: pay.url, "data-native": "" },
+          order.provider === "alipay" ? "前往支付宝付款" : `前往${order.providerLabel.replace("（易支付）", "")}付款`) : null,
         pay.type === "mock" ? h("div.stack",
           h("p.small.muted", "模拟支付仅用于测试，点击即视为支付成功。"),
           h("button.btn.btn-primary.btn-lg", { type: "button", onclick: (e) => busy(e.currentTarget, async () => {
