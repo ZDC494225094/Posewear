@@ -7,7 +7,8 @@ const fill = (template, values) =>
 // numbers here must match the order images are sent in: pose, the pose's depth
 // map, outfit, person, hair, scene, items. personKind is "none", "real" (a real
 // person's photo) or "virtual". A scene image replaces the scene preset. camera
-// is a lens preset; realism adds the "real, unretouched photograph" line.
+// is a lens preset; realism adds the "real photograph" line, except with an
+// illustration style.
 export function buildPrompt({ pose, poseDepth = false, outfit, outfitKeywords = "", personKind = "none", style, scene, sceneAsset = null,
   items = [], hair = null, camera = null, realism = false, userText = "" }) {
   const p = settings.get("prompt");
@@ -33,7 +34,7 @@ export function buildPrompt({ pose, poseDepth = false, outfit, outfitKeywords = 
   for (const item of items) lines.push(fill(p.item, { n: ++n, name: itemName(item) }));
   if (style?.prompt) lines.push(fill(p.style, { value: style.prompt }));
   if (camera?.prompt) lines.push(fill(p.camera, { value: camera.prompt }));
-  if (realism && p.realism) lines.push(p.realism);
+  if (realism && p.realism && style?.photo !== false) lines.push(p.realism);
   if (scene?.prompt && !sceneAsset) lines.push(fill(p.scene, { value: scene.prompt }));
   if (userText) lines.push(fill(p.user, { value: userText }));
   lines.push(p.outro);

@@ -301,3 +301,7 @@ body.admin #main { padding-bottom: 60px; min-height: 100vh; }
 .a-wd-edit.is-shots td:nth-last-child(2) .textarea { min-width: 340px; }
 .a-wd-edit:not(.is-shots) td:nth-child(1) .input { min-width: 100px; }
 .a-wd-edit:not(.is-shots) td:nth-child(7) .input { min-width: 96px; }
+
+/* The 写实 checkbox on style presets. */
+@media (min-width: 961px) { .preset-row:has(.preset-photo) { grid-template-columns: 130px 140px minmax(0, 1fr) auto auto; } }
+.preset-photo { align-items: center; font-size: 13px; white-space: nowrap; }

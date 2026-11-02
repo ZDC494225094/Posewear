@@ -58,7 +58,9 @@ export async function render(ctx) {
     style: pick(saved.style, ["", ...cfg.styles.map((s) => s.id)], ""),
     scene: pick(saved.scene, ["", ...cfg.scenes.map((s) => s.id)], ""),
     camera: pick(saved.camera, ["", ...(cfg.cameras || []).map((c) => c.id)], ""),
-    realism: !!saved.realism,
+    // On unless the user turned it off (drafts from before 1.8 never chose).
+    realism: saved.realismChosen ? !!saved.realism : true,
+    realismChosen: !!saved.realismChosen,
     prompt: typeof saved.prompt === "string" ? saved.prompt : ""
   };
   fitTier();
@@ -510,6 +512,9 @@ export async function render(ctx) {
         "aria-pressed": String(o.value === value), disabled: !!o.disabled, title: o.title || null, onclick: () => onPick(o.value) }, o.content ?? o.text)));
   }
 
+  // 真实感增强 describes a photograph; illustration styles go without it.
+  const photoStyle = () => cfg.styles.find((s) => s.id === state.style)?.photo !== false;
+
   // Each 画质 may go to different channels, which draw up to different tiers.
   function tierFits(tier, quality = state.quality) {
     const top = cfg.qualityTiers?.[quality];
@@ -556,9 +561,12 @@ export async function render(ctx) {
       (cfg.cameras || []).length ? h("section.panel-sec", sectionHead("camera", "indigo", "镜头", h("span.aside", "让成片更像真实拍摄")),
         chips("镜头", [{ value: "", text: "不指定" }, ...cfg.cameras.map((c) => ({ value: c.id, text: c.label }))], state.camera,
           (v) => { state.camera = v; update(); }),
-        h("label.switch.realism-switch", h("input", { type: "checkbox", checked: state.realism, onchange: (e) => { state.realism = e.target.checked; update(); } }),
+        h("label.switch.realism-switch", h("input", { type: "checkbox", checked: state.realism && photoStyle(), disabled: !photoStyle(),
+          onchange: (e) => { state.realism = e.target.checked; state.realismChosen = true; update(); } }),
           h("span.switch-ui", { "aria-hidden": "true" }),
-          h("span.switch-text", "真实感增强", h("small", "保留皮肤纹理、布料褶皱和自然光影，减轻 AI 感；适合写实风格")))) : null,
+          h("span.switch-text", "真实感增强", h("small", photoStyle()
+            ? "保留皮肤纹理、布料褶皱和自然光影，减轻 AI 感"
+            : "插画类风格不加真实感增强")))) : null,
       cfg.scenes.length ? h("section.panel-sec", sectionHead("mountain", "green", "快速场景", state.sceneAsset ? h("span.aside", "已选场景图，以场景图为准") : null),
         chips("快速场景", [{ value: "", text: "不指定" }, ...cfg.scenes.map((s) => ({ value: s.id, text: s.label }))], state.sceneAsset ? "" : state.scene,
           (v) => { state.scene = v; update(); }, { disabled: !!state.sceneAsset })) : null,
@@ -688,7 +696,7 @@ export async function render(ctx) {
         poseDepth: !!(state.poseDepth && state.pose?.hasDepth), hairId: state.hair?.id,
         sceneAssetId: state.sceneAsset?.id, itemIds: state.items.map((a) => a.id),
         prompt: state.prompt.trim(), style: state.style, scene: state.sceneAsset ? "" : state.scene,
-        camera: state.camera, realism: state.realism,
+        camera: state.camera, realism: state.realism && photoStyle(),
         ratio: state.ratio, tier: state.tier, quality: state.quality, n: state.n
       });
       if (filter === "favorite") { filter = ""; renderFeedTools(); await loadFeed(); }

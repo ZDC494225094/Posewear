@@ -3,6 +3,7 @@ import { config } from "./config.js";
 import { seedCategories, addMinors, addMajor, seedWeddingScenes, OUTFIT_TREE, UPSTREAM_OUTFIT_SERIES, MORE_PROFESSIONS,
   WEDDING_OUTFIT_TREES, WEDDING_PLATE_TREE, addLibraryTrees } from "./services/taxonomy-seed.js";
 import { outputTokens } from "./services/sizes.js";
+import { PROMPT, STYLES, SCENES, CAMERAS, PREVIOUS } from "./services/prompt-texts.js";
 
 export const db = new Database(config.dbFile);
 db.pragma("journal_mode = WAL");
@@ -811,6 +812,34 @@ const migrations = [
     for (const table of ["assets", "asset_categories"]) {
       const broken = conn.pragma(`foreign_key_check(${table})`);
       if (broken.length) throw new Error(`Migration 13 left ${broken.length} broken foreign key(s) in ${table}`);
+    }
+  },
+  // 14: rewritten prompt templates and style, scene and camera presets, for
+  // more lifelike photos. Saving any setting stores the whole group, defaults
+  // included, so copies of the old default texts become the new ones; texts an
+  // admin changed stay. Stored camera lists get the new 电商棚拍 preset.
+  (conn) => {
+    const read = (key) => {
+      const row = conn.prepare("SELECT value FROM settings WHERE key = ?").get(key);
+      try { return row ? JSON.parse(row.value) : null; } catch { return null; }
+    };
+    const write = (key, value) => conn.prepare("UPDATE settings SET value = ?, updated_at = ? WHERE key = ?").run(JSON.stringify(value), Date.now(), key);
+    const prompt = read("prompt");
+    if (prompt) {
+      for (const [key, old] of Object.entries(PREVIOUS.prompt)) if (prompt[key] === old) prompt[key] = PROMPT[key];
+      write("prompt", prompt);
+    }
+    const gen = read("generation");
+    if (gen) {
+      for (const [list, presets] of [["styles", STYLES], ["scenes", SCENES], ["cameras", CAMERAS]]) {
+        if (!Array.isArray(gen[list])) continue;
+        for (const preset of gen[list]) {
+          const old = PREVIOUS[list][preset?.id];
+          if (old !== undefined && preset.prompt === old) preset.prompt = presets.find((x) => x.id === preset.id).prompt;
+        }
+      }
+      if (Array.isArray(gen.cameras) && !gen.cameras.some((c) => c?.id === "catalog")) gen.cameras.push(CAMERAS.find((c) => c.id === "catalog"));
+      write("generation", gen);
     }
   }
 ];

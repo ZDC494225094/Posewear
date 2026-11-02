@@ -4,6 +4,7 @@ import { badRequest } from "../lib/errors.js";
 import { DEFAULT_LEGAL } from "./legal-defaults.js";
 import { bestTier, offeredQualities } from "./channels.js";
 import { flexibleSize, TIER_RANK } from "./sizes.js";
+import { PROMPT, STYLES, SCENES, CAMERAS } from "./prompt-texts.js";
 
 // Every operator-configurable value, grouped as the admin pages present them.
 // Stored per group as JSON overrides on top of these defaults.
@@ -62,35 +63,10 @@ export const DEFAULTS = {
     requestTimeoutSec: 240,
     maxActivePerUser: 3,
     dailyLimitPerUser: 100,
-    styles: [
-      { id: "photo", label: "写实摄影", prompt: "photorealistic fashion photography, natural skin texture, soft studio lighting, 85mm lens" },
-      { id: "editorial", label: "时尚大片", prompt: "high-end fashion magazine editorial, dramatic lighting, polished retouching" },
-      { id: "street", label: "街拍", prompt: "candid street-style photography, natural daylight, shallow depth of field" },
-      { id: "anime", label: "日系动漫", prompt: "clean anime illustration, crisp line art, cel shading, vivid colours" },
-      { id: "3d", label: "3D 角色", prompt: "stylised 3D character render, soft global illumination, high detail" },
-      { id: "watercolor", label: "水彩插画", prompt: "delicate watercolour fashion illustration, visible paper texture" }
-    ],
-    scenes: [
-      { id: "studio", label: "纯色影棚", prompt: "seamless light grey studio backdrop" },
-      { id: "city", label: "城市街道", prompt: "a lively city street with soft bokeh" },
-      { id: "cafe", label: "咖啡馆", prompt: "a cosy cafe interior with warm window light" },
-      { id: "beach", label: "海边", prompt: "a sunny beach with gentle waves" },
-      { id: "garden", label: "花园", prompt: "a blooming garden in spring" },
-      { id: "home", label: "居家", prompt: "a bright, minimal living room" }
-    ],
-    // Camera and lens looks. Naming real gear and its side effects (grain,
-    // depth of field, flash falloff) makes images read as photographs.
-    cameras: [
-      { id: "phone", label: "手机直出", prompt: "shot on a recent smartphone's main camera, natural HDR, slightly wide perspective, fine sensor noise in the shadows, unedited" },
-      { id: "35mm", label: "35mm 纪实", prompt: "35mm lens at f/2.8 on a full-frame camera, documentary framing, natural perspective, available light" },
-      { id: "50mm", label: "50mm 标准", prompt: "50mm f/1.8 lens on a full-frame camera, true-to-eye perspective, gentle background blur" },
-      { id: "85mm", label: "85mm 人像", prompt: "85mm f/1.4 portrait lens on a full-frame camera, shallow depth of field with smooth bokeh, flattering compression" },
-      { id: "135mm", label: "135mm 长焦", prompt: "135mm f/2 telephoto lens, strong background compression, subject cleanly separated from the background" },
-      { id: "24mm", label: "24mm 广角", prompt: "24mm wide-angle lens, environmental portrait that shows the surroundings, mild perspective stretch at the edges" },
-      { id: "film", label: "胶片", prompt: "shot on 35mm colour film (Kodak Portra 400), fine natural grain, soft highlight roll-off, true film colours" },
-      { id: "flash", label: "直闪", prompt: "on-camera direct flash, hard shadow just behind the subject, bright skin highlights, candid snapshot feel" },
-      { id: "studio-strobe", label: "影棚闪光", prompt: "medium-format camera with studio strobes and a large softbox, crisp detail, soft controlled shadows" }
-    ],
+    // Presets shown in the studio; their texts are in prompt-texts.js.
+    styles: STYLES,
+    scenes: SCENES,
+    cameras: CAMERAS,
     // Redrawing a finished work at 2K or 4K through the same channel.
     // Priced like a studio image of the same size at 标准 (6 × 1.6, 6 × 2.8).
     upscale: { enabled: true, quality: "medium", hdCredits: 10, uhdCredits: 17 },
@@ -99,28 +75,7 @@ export const DEFAULTS = {
     fallbackCostUsd: { low: 0.009, medium: 0.034, high: 0.133 },
     usdToCny: 7.2
   },
-  prompt: {
-    intro: "Create one finished, coherent image from the reference images described below.",
-    textOnlyIntro: "Create one finished, coherent image.",
-    pose: "Image {n} is the POSE reference: a neutral line-art mannequin. Match its body pose, limb positions, head direction, camera angle and framing. Do not copy the line-art style or the mannequin's body proportions.",
-    poseDuo: "Image {n} is the POSE reference for two people: neutral line-art mannequins. Match both figures' poses, their positions relative to each other, the camera angle and framing. Do not copy the line-art style.",
-    poseDepth: "Image {n} is a DEPTH MAP of the same pose: lighter areas are nearer the camera, darker areas farther away. Use it for the body's three-dimensional placement, how far each limb comes forward or goes back, and the foreshortening. Do not copy its grey look.",
-    outfit: "Image {n} is the OUTFIT reference: dress the subject in exactly this outfit, keeping its silhouette, colours, fabrics, patterns and accessories. Ignore how the outfit is displayed in the reference.",
-    person: "Image {n} is the PERSON reference: keep this person's facial features, skin tone and hairstyle recognisable. Do not copy their clothing, pose or background.",
-    personSafety: "Depict the person as an adult, fully clothed in the outfit, in a natural and non-sexualised way.",
-    virtualPersonSafety: "Depict the person as an adult.",
-    sceneImage: "Image {n} is the SCENE reference: place the subject in this location, keeping its setting, architecture or landscape, lighting and mood. Frame the shot to suit the output size and leave out any people shown in it.",
-    item: "Image {n} is an ITEM reference ({name}): the subject wears or holds this item naturally, keeping its shape, colours and materials. Ignore how it is displayed in the reference.",
-    hair: "Image {n} is a HAIR reference ({name}): give the subject this hairstyle, hair colour or hair accessory, or these eyes, as shown, keeping their shape and colour. Take nothing else from this image: not its drawing style, the face, the clothing or the background.",
-    style: "Visual style: {value}.",
-    scene: "Setting and background: {value}.",
-    camera: "Camera and lens: {value}.",
-    realism: "Make it look like a real, unretouched photograph: natural skin texture with pores and fine hair, slight asymmetry, real fabric creases, physically plausible light and shadows. Avoid the smooth, glossy, over-sharpened or over-saturated look of AI images.",
-    user: "Additional instructions from the user: {value}",
-    outro: "Output a single finished image, not a collage, comparison sheet or reference board. Do not add text, captions, labels, frames or watermarks.",
-    // Used on its own for 超分 (upscaling a finished work), not with the lines above.
-    upscale: "Image 1 is a finished image. Recreate it at a higher resolution as a faithful, high-fidelity upscale. Keep the composition, framing, people, faces, expressions, pose, hands, clothing, colours, lighting and background exactly as they are. Only add the fine detail a higher-resolution camera would capture: skin texture, individual hair strands, fabric weave, crisp edges. Do not add, remove, move or restyle anything, and do not add text, borders or watermarks."
-  },
+  prompt: PROMPT,
   safety: {
     suggestiveForAI: true,
     showSuggestive: true,
@@ -397,7 +352,11 @@ const numIn = (v, min, max, fallback) => {
 const pick = (v, allowed, fallback) => (allowed.includes(v) ? v : fallback);
 const ID = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 
-function presetList(list, fallback) {
+// Styles also say whether they are photographs (真实感增强 applies) or
+// illustrations; lists saved before 1.8 lack the flag and take the default's.
+const ILLUSTRATIONS = new Set(STYLES.filter((style) => !style.photo).map((style) => style.id));
+
+function presetList(list, fallback, { styles = false } = {}) {
   if (!Array.isArray(list)) return fallback;
   const seen = new Set();
   const out = [];
@@ -405,7 +364,9 @@ function presetList(list, fallback) {
     const id = text(item?.id).trim().toLowerCase();
     if (!ID.test(id) || seen.has(id)) continue;
     seen.add(id);
-    out.push({ id, label: text(item.label, id, 24).trim() || id, prompt: text(item.prompt, "", 600).trim() });
+    const preset = { id, label: text(item.label, id, 24).trim() || id, prompt: text(item.prompt, "", 600).trim() };
+    if (styles) preset.photo = typeof item.photo === "boolean" ? item.photo : !ILLUSTRATIONS.has(id);
+    out.push(preset);
   }
   return out;
 }
@@ -518,7 +479,7 @@ function sanitize(group, v) {
         requestTimeoutSec: intIn(v.requestTimeoutSec, 30, 900, d.requestTimeoutSec),
         maxActivePerUser: intIn(v.maxActivePerUser, 1, 50, d.maxActivePerUser),
         dailyLimitPerUser: intIn(v.dailyLimitPerUser, 0, 100000, d.dailyLimitPerUser),
-        styles: presetList(v.styles, d.styles),
+        styles: presetList(v.styles, d.styles, { styles: true }),
         scenes: presetList(v.scenes, d.scenes),
         cameras: presetList(v.cameras, d.cameras),
         upscale: {
@@ -718,7 +679,7 @@ export function publicConfig() {
       ratios: gen.ratios, defaultRatio: gen.defaultRatio,
       defaultQuality: shown.some((q) => q.id === gen.defaultQuality) ? gen.defaultQuality : shown[0]?.id || gen.defaultQuality,
       defaultTier: tiers.some((t) => t.id === gen.defaultTier) ? gen.defaultTier : "standard", maxN: gen.maxN,
-      styles: gen.styles.map(({ id, label }) => ({ id, label })),
+      styles: gen.styles.map(({ id, label, photo }) => ({ id, label, photo })),
       scenes: gen.scenes.map(({ id, label }) => ({ id, label })),
       cameras: gen.cameras.map(({ id, label }) => ({ id, label })),
       upscale: { enabled: gen.upscale.enabled && best !== "standard", targets: ["hd", "uhd"].filter((t) => TIER_RANK[t] <= TIER_RANK[best]),

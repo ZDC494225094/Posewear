@@ -13,7 +13,8 @@ const TIER_HELP = {
 };
 
 // Editable list of { id, label, prompt } presets (styles, scenes, cameras).
-function presetEditor(title, items, help) {
+// Styles also have photo: whether 真实感增强 applies.
+function presetEditor(title, items, help, { photo = false } = {}) {
   const rows = items.map((x) => ({ ...x }));
   const box = h("div.preset-list");
   function draw() {
@@ -22,8 +23,10 @@ function presetEditor(title, items, help) {
         h("input.input", { value: row.id, placeholder: "英文 ID", "aria-label": "ID", maxLength: 32, oninput: (e) => { row.id = e.target.value.trim(); } }),
         h("input.input", { value: row.label, placeholder: "显示名称", "aria-label": "显示名称", maxLength: 24, oninput: (e) => { row.label = e.target.value; } }),
         h("input.input", { value: row.prompt, placeholder: "发给模型的英文描述", "aria-label": "提示词", maxLength: 600, oninput: (e) => { row.prompt = e.target.value; } }),
+        photo ? h("label.check.preset-photo", { title: "写实摄影类风格可以加真实感增强；动漫、插画等风格不加" },
+          h("input", { type: "checkbox", checked: row.photo !== false, onchange: (e) => { row.photo = e.target.checked; } }), "写实") : null,
         h("button.btn.btn-sm.btn-ghost", { type: "button", "aria-label": "删除", onclick: () => { rows.splice(i, 1); draw(); } }, "删除"))),
-      h("button.btn.btn-sm", { type: "button", onclick: () => { rows.push({ id: "", label: "", prompt: "" }); draw(); } }, "添加一项"));
+      h("button.btn.btn-sm", { type: "button", onclick: () => { rows.push({ id: "", label: "", prompt: "", ...(photo ? { photo: true } : {}) }); draw(); } }, "添加一项"));
   }
   draw();
   return { node: h("div.a-field.is-wide", h("label", title), help ? h("small", help) : null, box), get value() { return rows.filter((r) => r.id); } };
@@ -150,7 +153,7 @@ export async function render() {
     main.node.addEventListener("input", overview.draw);
     main.node.addEventListener("change", overview.draw);
   }
-  const styles = presetEditor("风格预设", value.styles, "ID 用英文小写；描述用英文写给模型看，例如 photorealistic fashion photography。");
+  const styles = presetEditor("风格预设", value.styles, "ID 用英文小写；描述用英文写给模型看，例如 a photorealistic fashion photograph。勾选“写实”的风格会加上真实感增强。", { photo: true });
   const scenes = presetEditor("场景预设", value.scenes, "例如 seamless light grey studio backdrop。");
   const cameras = presetEditor("镜头预设", value.cameras || [], "写清器材和它带来的效果，例如 85mm f/1.4 portrait lens, shallow depth of field。真实的器材描述能让成片更像照片。");
 

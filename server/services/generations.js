@@ -211,7 +211,8 @@ export function validateRequest(user, input) {
   if (input.scene && !scene) throw badRequest("INVALID_SCENE", "所选场景不存在");
   const camera = input.camera ? gen.cameras.find((c) => c.id === input.camera) : null;
   if (input.camera && !camera) throw badRequest("INVALID_CAMERA", "所选镜头不存在");
-  const realism = !!input.realism;
+  // 真实感增强 describes a photograph, so illustration styles go without it.
+  const realism = !!input.realism && style?.photo !== false;
   const userText = v.str(input.prompt, "prompt", { optional: true, max: 1000 });
   const banned = findBannedWord(userText);
   if (banned) throw badRequest("PROMPT_BLOCKED", `描述中包含不允许的内容（“${banned}”），请修改后再试`);

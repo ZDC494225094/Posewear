@@ -18,7 +18,7 @@ const FIELDS = [
   ["item", "物品说明", "每件物品一行，{name} 替换为物品的英文分类名。"],
   ["style", "风格行", "{value} 替换为所选风格预设的描述。"],
   ["camera", "镜头行", "{value} 替换为所选镜头预设的描述。"],
-  ["realism", "真实感增强", "用户打开“真实感增强”时追加，用来减轻 AI 感。"],
+  ["realism", "真实感增强", "创作台默认打开，写实类风格才追加，用来减轻 AI 感。"],
   ["scene", "场景行", "{value} 替换为所选场景预设的描述。"],
   ["user", "用户补充描述", "{value} 替换为用户输入的文字。"],
   ["outro", "结尾", "约束输出为单张成片。"],
@@ -38,8 +38,8 @@ export async function render() {
     const fill = (t, vals) => String(t || "").replace(/\{(\w+)\}/g, (a, k) => (k in vals ? vals[k] : a));
     preview.textContent = [v.intro, fill(v.pose, { n: 1 }), `${fill(v.outfit, { n: 2 })} Key pieces: ivory frill knit, denim mini skirt.`,
       fill(v.person, { n: 3 }), v.personSafety, fill(v.sceneImage, { n: 4 }), fill(v.item, { n: 5, name: "necklace" }),
-      fill(v.style, { value: "photorealistic fashion photography" }),
-      fill(v.camera, { value: "85mm f/1.4 portrait lens on a full-frame camera, shallow depth of field with smooth bokeh" }), v.realism, fill(v.user, { value: "黄昏的天台，逆光，微笑看向镜头" }), v.outro]
+      fill(v.style, { value: "a photorealistic fashion photograph for a clothing brand's lookbook, with natural, unforced posing and true-to-life colour, lit by the light of the setting" }),
+      fill(v.camera, { value: "85mm portrait lens at f/2 on a full-frame camera, the subject in focus throughout, the background softly out of focus, mild perspective compression" }), v.realism, fill(v.user, { value: "黄昏的天台，逆光，微笑看向镜头" }), v.outro]
       .filter(Boolean).join("\n");
   };
   box.addEventListener("input", updatePreview);

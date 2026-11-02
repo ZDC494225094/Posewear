@@ -113,7 +113,7 @@ export function reuseInStudio(gen) {
   // A 超分 work's tier and quality are the 超分 settings, not how the source was made.
   const made = gen.upscaleOf ? {} : { tier: gen.tier, quality: gen.quality, n: gen.n };
   draft.patch({ ratio: gen.ratio, ...made, style: gen.style, scene: gen.scene,
-    camera: gen.camera || "", realism: !!gen.realism,
+    camera: gen.camera || "", realism: !!gen.realism, realismChosen: true,
     prompt: gen.prompt || "", pose: null, poseDepth: !!refs.poseDepth, outfit: null, outfitUpload, sceneAsset: null, items: [],
     hair: null, person });
   const params = new URLSearchParams();

@@ -149,9 +149,19 @@ test("the camera preset and the realism switch add their prompt lines, and are k
   await waitFor(async () => (await user.get(`/api/generations/${res.data.generation.id}`)).data.generation.status === "succeeded");
   const withCamera = fake.requests.findLast((r) => String(r.fields.prompt).includes("blue coat")).fields.prompt;
   const without = fake.requests.findLast((r) => String(r.fields.prompt).includes("red coat")).fields.prompt;
-  assert.match(withCamera, /Camera and lens: 85mm f\/1\.4 portrait lens/);
-  assert.match(withCamera, /Make it look like a real, unretouched photograph/);
-  assert.doesNotMatch(without, /Camera and lens|unretouched/);
+  assert.match(withCamera, /Camera and lens: 85mm portrait lens at f\/2/);
+  assert.match(withCamera, /It looks like an unstaged moment that someone actually photographed/);
+  assert.doesNotMatch(without, /Camera and lens|unstaged moment/);
+  // Every request asks for a photograph unless an illustration style is named.
+  assert.match(without, /^Create one photorealistic photograph/);
+  // 真实感增强 describes a photograph: an illustration style goes without it.
+  const anime = await user.post("/api/generations", { prompt: "a woman in a green coat", quality: "low", style: "anime", realism: true });
+  assert.equal(anime.status, 201, JSON.stringify(anime.data));
+  assert.equal(anime.data.generation.realism, false);
+  await waitFor(async () => (await user.get(`/api/generations/${anime.data.generation.id}`)).data.generation.status === "succeeded");
+  const drawn = fake.requests.findLast((r) => String(r.fields.prompt).includes("green coat")).fields.prompt;
+  assert.match(drawn, /Visual style: clean anime illustration/);
+  assert.doesNotMatch(drawn, /unstaged moment/);
   const badCamera = await user.post("/api/generations", { prompt: "x", quality: "low", camera: "fisheye-9000" });
   assert.equal(badCamera.data.error.code, "INVALID_CAMERA");
 });
