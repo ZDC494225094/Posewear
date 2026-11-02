@@ -160,51 +160,74 @@ body.admin #main { padding-bottom: 60px; min-height: 100vh; }
 .chart-table .table-wrap { max-height: 240px; overflow: auto; margin-top: 6px; }
 
 /* ---------- channels */
-.channel-list { display: grid; gap: 12px; margin-bottom: 16px; }
-.channel-card { display: flex; justify-content: space-between; gap: 18px; padding: 20px 22px; border-radius: var(--r-l); background: var(--surface); box-shadow: var(--shadow-1); }
-.channel-card.is-off { opacity: .65; }
-.channel-main { display: grid; gap: 4px; min-width: 0; }
-.channel-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.channel-title h3 { font-size: 17px; letter-spacing: -0.02em; }
-.channel-error { color: #d70015; word-break: break-all; }
+/* AI 渠道: one table with the same columns for every model; each channel is
+   a grey group header across it, with its connection, numbers and actions. */
+.channel-table { min-width: 1040px; table-layout: fixed; border-collapse: separate; border-spacing: 0; }
+.channel-table th { white-space: nowrap; }
+.channel-table td { vertical-align: middle; }
+.channel-head > td { padding: 12px 14px; border-bottom: 0; border-radius: 12px; background: var(--fill-2); }
+.channel-group > tr:last-child > td { border-bottom: 0; }
+.channel-group:not(:last-of-type) > tr:last-child > td { padding-bottom: 22px; }
+.channel-group > tr.channel-head:last-child > td { padding-bottom: 12px; }
+.channel-group:not(:last-of-type) > tr.channel-head:last-child { box-shadow: 0 10px 0 var(--surface); }
+.channel-head-inner { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-width: 0; }
+.channel-head-main { display: grid; gap: 4px; min-width: 0; }
+.channel-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.channel-title strong { font-size: 15px; letter-spacing: -0.01em; }
+.channel-priority { color: var(--label-3); font-size: 12.5px; }
+.channel-meta { display: flex; flex-wrap: wrap; gap: 2px 16px; color: var(--label-2); font-size: 12.5px; }
+.channel-meta code { padding: 0 5px; background: var(--surface); }
+.channel-head-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+.channel-head-actions .btn { --btn-bg: var(--surface); }
+.channel-switch { display: inline-flex; align-items: center; margin-left: 6px; padding-left: 12px; border-left: 1px solid var(--separator); }
+.channel-error { overflow: hidden; color: #d70015; font-size: 12.5px; white-space: nowrap; text-overflow: ellipsis; }
 .channel-error.is-recovered { color: var(--label-3); }
-.channel-actions { display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; justify-content: flex-end; max-width: 380px; }
-.channel-test { margin-top: 8px; padding: 12px 14px; border-radius: 14px; background: var(--fill-2); font-size: 13.5px; display: grid; gap: 8px; }
-.channel-test .ok { color: #248a3d; font-weight: 600; }
-.channel-test .bad { color: #d70015; font-weight: 600; word-break: break-all; }
-.channel-test img { border-radius: 10px; }
-/* AI 渠道: one table body per channel, its models in the row below it. */
-.channel-table > tbody + tbody { border-top: 6px solid var(--bg, #f5f5f7); }
-.channel-table > tbody.is-off .channel-row { opacity: .6; }
-.channel-row td { vertical-align: top; }
-.channel-table .channel-title { margin-bottom: 4px; }
-.channel-actions { text-align: right; white-space: normal; }
-.channel-actions .btn { margin: 0 0 6px 6px; }
-.channel-models > td { padding-top: 0; }
-.model-table { width: 100%; border-collapse: collapse; background: var(--fill-2); border-radius: 12px; overflow: hidden; }
-.model-table td { padding: 9px 12px; border-top: 1px solid var(--separator); vertical-align: middle; font-size: 13px; }
-.model-table tr:first-child td { border-top: 0; }
-.model-table tr.is-off { opacity: .55; }
-.model-name { width: 24%; }
-.model-sizes { width: 1%; white-space: nowrap; }
-.model-info { line-height: 1.6; }
-.model-stats { width: 1%; white-space: nowrap; }
-.model-stats .channel-error { white-space: normal; max-width: 220px; }
+.channel-group.is-off .channel-head-main, .channel-group.is-off .model-row > td:not(.model-switch):not(.model-actions) { opacity: .55; }
+.model-row > td { padding-top: 10px; padding-bottom: 10px; }
+.model-row > td:first-child { position: relative; padding-left: 30px; }
+/* The └ that ties a model to its channel. */
+.model-row > td:first-child::before { content: ""; position: absolute; left: 14px; top: 0; height: 50%; width: 9px; border-left: 1px solid rgba(60, 60, 67, .22); border-bottom: 1px solid rgba(60, 60, 67, .22); border-bottom-left-radius: 5px; }
+.model-row.is-off > td:not(.model-switch):not(.model-actions) { opacity: .5; }
+.model-name { min-width: 0; }
+.m-id { font-family: var(--mono); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.m-channel { color: var(--label-3); font-size: 12px; }
+.model-price { line-height: 1.5; }
 .model-actions { text-align: right; white-space: nowrap; }
 .model-actions .btn + .btn { margin-left: 6px; }
-.size-marks { display: inline-flex; gap: 6px; flex-wrap: nowrap; }
-.size-mark { padding: 2px 7px; border-radius: 6px; font-size: 12px; white-space: nowrap; background: var(--surface); }
+.model-empty { padding-left: 30px; }
+.model-empty .btn { margin-left: 12px; }
+.size-marks { display: inline-flex; gap: 5px; flex-wrap: nowrap; }
+.size-mark { padding: 2px 6px; border-radius: 6px; background: var(--fill-2); font-size: 12px; white-space: nowrap; }
 .size-mark.ok { color: #248a3d; }
 .size-mark.bad { color: #d70015; }
 .size-mark.unknown { color: #b25000; }
 .size-mark.off { color: var(--label-3); }
-.route-table td { vertical-align: middle; }
-.route-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.route-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; border-radius: 999px; background: var(--fill-2); font-size: 13px; }
-.route-chip > .num { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--black); color: #fff; font-size: 11px; }
-.route-chip.is-off { opacity: .7; }
-.route-chip .btn { min-height: 24px; padding: 0 8px; }
-.route-add { width: 100%; }
+.switch-sm .switch-ui { width: 36px; height: 22px; }
+.switch-sm .switch-ui::after { width: 18px; height: 18px; }
+.switch-sm input:checked + .switch-ui::after { transform: translateX(14px); }
+.switch input:disabled + .switch-ui { opacity: .5; }
+.a-form-actions .a-form-danger { margin-right: auto; }
+/* 清晰度分配 */
+.route-table { min-width: 760px; table-layout: fixed; }
+.route-table td, .route-table th { vertical-align: middle; }
+.route-table th.route-tier { padding: 11px 10px; color: var(--label); font-size: 14px; font-weight: 600; }
+.route-table tbody tr:last-child > th { border-bottom: 0; }
+.route-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.route-auto { margin-right: 4px; color: var(--label-3); font-size: 13px; }
+.route-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; max-width: 100%; padding: 0 4px 0 6px; border-radius: 999px; background: var(--fill-2); font-size: 13px; }
+.route-chip.is-off { opacity: .55; }
+.route-n { display: inline-grid; place-items: center; flex: none; width: 18px; height: 18px; border-radius: 50%; background: var(--black); color: #fff; font-size: 11px; }
+.route-btn { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--label-2); font-size: 12px; cursor: pointer; }
+.route-btn:hover { background: var(--fill); color: var(--label); }
+.select-btn.route-add { width: auto; min-height: 30px; padding: 0 10px 0 12px; border: 1px dashed rgba(60, 60, 67, .3); border-radius: 999px; background: transparent; color: var(--label-2); font-size: 13px; }
+.select-btn.route-add:hover { border-color: rgba(60, 60, 67, .5); background: var(--fill-2); }
+.route-now { font-size: 13px; }
+.route-state { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.route-state > span:last-child { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; min-width: 0; }
+.route-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--c-green); transform: translateY(-1px); }
+.route-state-label { color: var(--label-3); }
+.route-state.is-bad { color: #d70015; }
+.route-state.is-bad .route-dot { background: #ff3b30; }
 
 /* ---------- assets */
 .a-tabs-row { display: flex; align-items: center; justify-content: space-between; gap: 12px 20px; flex-wrap: wrap; margin-bottom: 14px; }
@@ -259,8 +282,6 @@ body.admin #main { padding-bottom: 60px; min-height: 100vh; }
   .a-main { padding: 20px 16px; }
   .chart-grid, .prompt-layout { grid-template-columns: 1fr; }
   .stat-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .channel-card { flex-direction: column; }
-  .channel-actions { justify-content: flex-start; max-width: none; }
   .preset-row { grid-template-columns: 1fr 1fr; }
 }
 

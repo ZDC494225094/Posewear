@@ -2,6 +2,7 @@ import { h, replace } from "../../core/dom.js";
 import { api } from "../../core/api.js";
 import { toast, toastError, busy, confirmDialog, modal } from "../../core/ui.js";
 import { dateTime, number } from "../../core/format.js";
+import { selectMenu } from "../../core/select.js";
 import { pageHead, section, form, drawer, statusPill } from "../kit.js";
 
 const KIND_TEXT = { openai: "OpenAI 兼容", gemini: "Google Gemini", mock: "模拟" };
@@ -51,6 +52,26 @@ function pricingText(ctx, kind, model) {
     return `按张：${TIERS.filter((t) => TIER_RANK[t] <= TIER_RANK[capOf(kind, model.options)]).map((t) => `${TIER_TEXT[t]} ${sign}${num(p[t])}`).join("、")}`;
   }
   return `按 token（每百万）：输入 ${sign}${num(p.textInput)} / ${sign}${num(p.imageInput)}，图片输出 ${sign}${num(p.imageOutput)}`;
+}
+
+function pricingShort(ctx, kind, model) {
+  const p = { mode: "auto", currency: "usd", ...(model.options.pricing || {}) };
+  if (p.mode === "auto") {
+    const profile = profileFor(ctx.models, model.model);
+    return !profile || /^gpt-image-2/.test(profile.id) || profile.price?.unit === "token" ? "官方价 · 按 token" : "官方价 · 按张";
+  }
+  const sign = p.currency === "cny" ? "¥" : "$";
+  if (p.mode === "image") {
+    return TIERS.filter((t) => TIER_RANK[t] <= TIER_RANK[capOf(kind, model.options)]).map((t) => `${TIER_TEXT[t]} ${sign}${num(p[t])}`).join(" · ");
+  }
+  return `按 token · 输出 ${sign}${num(p.imageOutput)}/百万`;
+}
+
+// Errors from relays often carry a whole HTML page; show its status only.
+function errorText(message) {
+  const text = String(message || "");
+  const html = text.search(/<!doctype|<html|<head|<body/i);
+  return html < 0 ? text : `${text.slice(0, html).trim() || "错误"}（返回了一个网页，常见于中转站超时或网关出错）`;
 }
 
 function recognition(ctx, kind, profile) {
@@ -131,6 +152,10 @@ function editChannel(channel, ctx, reload) {
     isNew && kind !== "mock" ? h("p.small.muted", "第一步填好接口地址和 API Key，保存后选这个渠道要用的模型，再逐个检测它们能出的尺寸。") : null,
     f.node,
     h("div.a-form-actions",
+      isNew ? null : h("button.btn.btn-ghost.btn-danger.a-form-danger", { type: "button", onclick: async () => {
+        if (!(await confirmDialog({ title: `删除渠道「${channel.name}」？`, message: "它的模型会一起删除，清晰度分配里也会去掉。历史生成记录不受影响。", confirmText: "删除", danger: true }))) return;
+        try { await api.del(`/api/admin/channels/${channel.id}`); m.close(); await reload(); } catch (err) { toastError(err); }
+      } }, "删除渠道"),
       h("button.btn", { type: "button", onclick: () => m.close() }, "取消"),
       h("button.btn.btn-primary", { type: "button", onclick: (e) => busy(e.currentTarget, async () => {
         try {
@@ -268,6 +293,10 @@ function editModel(channel, model, ctx, reload) {
     } }, "按识别结果重新填写")) : null,
     f.node,
     h("div.a-form-actions",
+      h("button.btn.btn-ghost.btn-danger.a-form-danger", { type: "button", onclick: async () => {
+        if (!(await confirmDialog({ title: `移除模型 ${model.model}？`, message: "清晰度分配里也会去掉它。历史生成记录不受影响。", confirmText: "移除", danger: true }))) return;
+        try { await api.del(`/api/admin/channel-models/${model.id}`); m.close(); await reload(); } catch (err) { toastError(err); }
+      } }, "移除模型"),
       h("button.btn", { type: "button", onclick: () => m.close() }, "取消"),
       h("button.btn.btn-primary", { type: "button", onclick: (e) => busy(e.currentTarget, async () => {
         try {
@@ -302,8 +331,21 @@ export async function render() {
   }
 
   const allModels = () => data.items.flatMap((c) => c.models.map((m) => ({ ...m, channel: c })));
-  const modelName = (m) => `${m.channel.name} · ${m.model}`;
   const draws = (m, tier) => TIER_RANK[tier] <= TIER_RANK[m.maxTier || "standard"];
+  // The model ID first, then the channel it belongs to.
+  const modelLabel = (m) => [h("span.m-id", m.model), h("span.m-channel", m.channel.name)];
+  const modelText = (m) => `${m.model}（${m.channel.name}）`;
+
+  // A small 启用 switch for table rows.
+  function enabledSwitch(on, label, save) {
+    return h("label.switch.switch-sm", { title: on ? `停用${label}` : `启用${label}` },
+      h("input", { type: "checkbox", checked: on, "aria-label": `启用${label}`, onchange: async (e) => {
+        e.target.disabled = true;
+        try { await save(e.target.checked); await load(); } catch (err) { e.target.checked = !e.target.checked; toastError(err); }
+        e.target.disabled = false;
+      } }),
+      h("span.switch-ui", { "aria-hidden": "true" }));
+  }
 
   // 清晰度分配: per tier, the models to try in order (the server's routeOrder).
   function routesSection() {
@@ -322,33 +364,36 @@ export async function render() {
       return { first: (routed.length ? routed : fits)[0], auto: !routed.length };
     };
     const rows = TIERS.map((tier) => {
-      const ids = data.routes[tier] || [];
+      const ids = (data.routes[tier] || []).filter((id) => byId.has(id));
       const move = (i, d) => { const next = [...ids]; [next[i], next[i + d]] = [next[i + d], next[i]]; save({ ...data.routes, [tier]: next }); };
       const drop = (id) => save({ ...data.routes, [tier]: ids.filter((x) => x !== id) });
       const choices = models.filter((m) => !ids.includes(m.id) && m.channel.kind !== "mock");
       const { first, auto } = firstFor(tier);
+      const add = choices.length ? selectMenu({ label: `给${TIER_TEXT[tier]}添加模型`, placeholder: "＋ 添加模型", className: "route-add",
+        options: choices.map((m) => ({ value: String(m.id), text: modelText(m), disabled: !draws(m, tier), note: draws(m, tier) ? "" : "出不了这个尺寸" })),
+        onChange: (v) => { if (v) save({ ...data.routes, [tier]: [...ids, Number(v)] }); } }).node : null;
       return h("tr",
-        h("td", h("strong", TIER_TEXT[tier])),
-        h("td", ids.length ? h("div.route-chips", ids.map((id, i) => {
-          const m = byId.get(id);
-          if (!m) return null;
-          const problem = !usableModel(m.channel, m) ? "已停用" : !draws(m, tier) ? "出不了这个尺寸" : "";
-          return h("span.route-chip", { class: problem ? "is-off" : "" },
-            h("span.num", `${i + 1}`), modelName(m), problem ? h("span.text-pin", `（${problem}，不会用它）`) : null,
-            i > 0 ? h("button.btn.btn-sm.btn-ghost", { type: "button", title: "提前", "aria-label": "提前", onclick: () => move(i, -1) }, "↑") : null,
-            h("button.btn.btn-sm.btn-ghost", { type: "button", title: "移除", "aria-label": "移除", onclick: () => drop(id) }, "✕"));
-        })) : h("span.muted", "自动：按渠道优先级，用所有能出这个尺寸的模型")),
-        h("td", choices.length ? h("select.input.route-add", { "aria-label": `给${TIER_TEXT[tier]}添加模型`, onchange: (e) => {
-          const id = Number(e.target.value);
-          if (id) save({ ...data.routes, [tier]: [...ids, id] });
-        } }, h("option", { value: "" }, "添加模型…"), choices.map((m) => h("option", { value: m.id, disabled: !draws(m, tier) },
-          `${modelName(m)}${draws(m, tier) ? "" : "（出不了这个尺寸）"}`))) : null),
-        h("td.small", first ? [h("span.muted", auto && ids.length ? "指定的都不能用，现在用 " : "现在先用 "), modelName(first)]
-          : h("span.text-pin", tier === "standard" ? "没有可用的模型" : "没有能出这个尺寸的模型，用户看不到这一档")));
+        h("th.route-tier", { scope: "row" }, TIER_TEXT[tier]),
+        h("td", h("div.route-line",
+          ids.length ? ids.map((id, i) => {
+            const m = byId.get(id);
+            const problem = !usableModel(m.channel, m) ? "已停用，不会用它" : !draws(m, tier) ? "出不了这个尺寸，不会用它" : "";
+            return h("span.route-chip", { class: problem ? "is-off" : "", title: problem || modelText(m) },
+              h("span.route-n.num", `${i + 1}`), ...modelLabel(m),
+              i > 0 ? h("button.route-btn", { type: "button", title: "提前", "aria-label": `提前 ${m.model}`, onclick: () => move(i, -1) }, "↑") : null,
+              h("button.route-btn", { type: "button", title: "移除", "aria-label": `移除 ${m.model}`, onclick: () => drop(id) }, "✕"));
+          }) : h("span.route-auto", "自动：按渠道优先级，用所有能出这个尺寸的模型"),
+          add)),
+        h("td.route-now", first
+          ? h("div.route-state.is-ok", h("span.route-dot", { "aria-hidden": "true" }),
+            h("span", h("span.route-state-label", auto && ids.length ? "指定的都不能用，现在用" : "现在用"), ...modelLabel(first)))
+          : h("div.route-state.is-bad", h("span.route-dot", { "aria-hidden": "true" }),
+            h("span", tier === "standard" ? "没有可用的模型，用户无法生成" : "没有能出这个尺寸的模型，用户看不到这一档"))));
     });
     return section("清晰度分配", "给每档清晰度指定用哪些模型，按顺序使用，前一个失败或满载时换下一个。没指定时按渠道优先级用所有能出这个尺寸的模型；指定的模型都不能用时（停用、没有 Key、不接作品的画质）也会这样。",
       h("div.table-wrap", h("table.data-table.a-table.route-table",
-        h("thead", h("tr", h("th", { style: { width: "64px" } }, "清晰度"), h("th", "使用的模型（按顺序）"), h("th", { style: { width: "240px" } }, ""), h("th", { style: { width: "240px" } }, "状态"))),
+        h("colgroup", h("col", { style: { width: "72px" } }), h("col"), h("col", { style: { width: "300px" } })),
+        h("thead", h("tr", h("th", "清晰度"), h("th", "使用的模型（按顺序）"), h("th", "现在使用"))),
         h("tbody", rows))));
   }
 
@@ -366,64 +411,70 @@ export async function render() {
     });
   }
 
-  function modelRows(c) {
-    if (c.kind === "mock") return h("p.small.muted", "返回占位图，不调用模型。");
-    if (!c.models.length) return h("p.small", h("span.text-pin", "还没有模型，这个渠道不会接任务。"), " ",
-      h("button.btn.btn-sm", { type: "button", onclick: () => addModels(c, ctx, load) }, "添加模型"));
-    const qualityText = (m) => {
-      const names = ctx.qualities.filter((q) => (m.options.qualities || []).includes(q.id)).map((q) => q.label);
-      return names.length === ctx.qualities.length ? "全部画质" : names.join("、");
-    };
-    return h("table.model-table",
-      h("tbody", c.models.map((m) => h("tr", { class: m.enabled ? "" : "is-off" },
-        h("td.model-name", h("strong.num", m.model), m.enabled ? null : statusPill("已停用"),
-          m.profile && m.profile.label !== m.model ? h("div.small.muted", m.profile.label) : null),
-        h("td.model-sizes", sizeCells(c.kind, m)),
-        h("td.model-info.small", h("div", "画质：", qualityText(m)), h("div.muted", "成本：", pricingText(ctx, c.kind, m))),
-        h("td.model-stats.small.faint", `成功 ${number(m.successCount)} · 失败 ${number(m.failureCount)}`,
-          m.lastError && m.lastErrorAt > (m.lastOkAt || 0) ? h("div.channel-error", { title: m.lastError }, `最近出错：${m.lastError.slice(0, 40)}`) : null),
-        h("td.model-actions",
-          capOf(c.kind, m.options) !== "standard" ? h("button.btn.btn-sm", { type: "button",
-            title: "按最高清晰度生成一张低画质测试图（4K 没通过时再测 2K），看实际返回多大的图，结果会记到模型上。会产生一到两次生成的费用", onclick: (e) => testModel(e, m, "size") }, "检测尺寸") : null,
-          h("button.btn.btn-sm", { type: "button", title: "生成一张标准尺寸的低画质测试图，会产生少量费用", onclick: (e) => testModel(e, m, "generate") }, "试生成"),
-          h("button.btn.btn-sm", { type: "button", onclick: () => editModel(c, m, ctx, load) }, "设置"),
-          h("button.btn.btn-sm.btn-ghost.btn-danger", { type: "button", onclick: async () => {
-            if (!(await confirmDialog({ title: `移除模型 ${m.model}？`, message: "清晰度分配里也会去掉它。历史生成记录不受影响。", confirmText: "移除", danger: true }))) return;
-            try { await api.del(`/api/admin/channel-models/${m.id}`); load(); } catch (err) { toastError(err); }
-          } }, "移除"))))));
+  const COLUMNS = 7;
+  const qualityText = (m) => {
+    const names = ctx.qualities.filter((q) => (m.options.qualities || []).includes(q.id)).map((q) => q.label);
+    return names.length === ctx.qualities.length ? "全部" : names.join("、") || "—";
+  };
+  const errorLine = (message, recovered) => h("div.channel-error", { class: recovered ? "is-recovered" : "", title: message },
+    `${recovered ? "上次错误（已恢复）" : "最近错误"}：${errorText(message)}`);
+
+  // A channel is a group header across the table: how to reach it, its numbers and its actions.
+  function channelHead(c) {
+    const recovered = c.lastOkAt > c.lastErrorAt;
+    const meta = c.kind === "mock" ? ["返回占位图，不调用真实模型。正式运营前请停用。"]
+      : [h("span.num", c.resolvedBaseUrl),
+        h("span", "Key ", c.apiKey.set ? h("code", c.apiKey.hint) : h("strong.text-pin", "未设置")),
+        c.options?.maxConcurrency ? h("span", `最多同时 ${c.options.maxConcurrency} 个`) : null];
+    return h("tr.channel-head", h("td", { colSpan: COLUMNS }, h("div.channel-head-inner",
+      h("div.channel-head-main",
+        h("div.channel-title", h("strong", c.name), statusPill(c.kind === "mock" ? "模拟" : KIND_TEXT[c.kind], c.kind === "mock" ? "tape" : ""),
+          h("span.channel-priority", `优先级 ${c.priority}`), c.enabled ? null : statusPill("已停用")),
+        h("div.channel-meta", ...meta.filter(Boolean),
+          h("span.num", `成功 ${number(c.successCount)} · 失败 ${number(c.failureCount)}`),
+          c.lastOkAt ? h("span", `最近成功 ${dateTime(c.lastOkAt)}`) : null),
+        c.lastError && c.lastErrorAt ? errorLine(c.lastError, recovered) : null),
+      h("div.channel-head-actions",
+        h("button.btn.btn-sm", { type: "button", onclick: (e) => busy(e.currentTarget, async () => {
+          try {
+            const r = await api.post(`/api/admin/channels/${c.id}/test`, { mode: "ping" });
+            toast(`${r.message}${r.ms ? `（${r.ms} ms）` : ""}`, { type: r.ok ? "success" : "error" });
+          } catch (err) { toastError(err); }
+        }) }, "测试连接"),
+        c.kind !== "mock" ? h("button.btn.btn-sm", { type: "button", onclick: () => addModels(c, ctx, load) }, "添加模型") : null,
+        h("button.btn.btn-sm", { type: "button", onclick: () => editChannel(c, ctx, load) }, "编辑渠道"),
+        h("span.channel-switch", enabledSwitch(c.enabled, "渠道", (on) => api.put(`/api/admin/channels/${c.id}`, { enabled: on })))))));
+  }
+
+  function modelRow(c, m) {
+    const failing = m.lastError && m.lastErrorAt > (m.lastOkAt || 0);
+    const full = pricingText(ctx, c.kind, m);
+    return h("tr.model-row", { class: m.enabled ? "" : "is-off" },
+      h("td.model-name", h("div.m-id", m.model), m.profile && m.profile.label !== m.model ? h("div.small.muted", m.profile.label) : null),
+      h("td", sizeCells(c.kind, m)),
+      h("td.small", qualityText(m)),
+      h("td.small.model-price", { title: full }, pricingShort(ctx, c.kind, m)),
+      h("td.small", h("div.num.faint", `成功 ${number(m.successCount)} · 失败 ${number(m.failureCount)}`),
+        failing ? errorLine(m.lastError, false) : null),
+      h("td.model-switch", enabledSwitch(m.enabled, "模型", (on) => api.put(`/api/admin/channel-models/${m.id}`, { enabled: on }))),
+      h("td.model-actions",
+        capOf(c.kind, m.options) !== "standard" ? h("button.btn.btn-sm", { type: "button",
+          title: "按最高清晰度生成一张低画质测试图（4K 没通过时再测 2K），看实际返回多大的图，结果会记到模型上。会产生一到两次生成的费用", onclick: (e) => testModel(e, m, "size") }, "检测尺寸") : null,
+        h("button.btn.btn-sm", { type: "button", title: "生成一张标准尺寸的低画质测试图，会产生少量费用", onclick: (e) => testModel(e, m, "generate") }, "试生成"),
+        h("button.btn.btn-sm", { type: "button", onclick: () => editModel(c, m, ctx, load) }, "设置")));
   }
 
   function channelTable() {
+    const widths = [null, "172px", "100px", "164px", "136px", "60px", "228px"];
     return h("div.table-wrap", h("table.data-table.a-table.channel-table",
-      h("thead", h("tr", h("th", "渠道"), h("th", "接口与 Key"), h("th", "调用"), h("th", { style: { width: "320px" } }, ""))),
-      ...data.items.map((c) => h("tbody", { class: c.enabled ? "" : "is-off" },
-        h("tr.channel-row",
-          h("td", h("div.channel-title", h("strong", c.name), c.enabled ? statusPill("已启用", "mat") : statusPill("已停用"),
-            c.kind === "mock" ? statusPill("模拟", "tape") : statusPill(KIND_TEXT[c.kind])),
-          h("span.small.faint", `优先级 ${c.priority}`)),
-          h("td.small", c.kind === "mock" ? h("span.muted", "—") : [h("span.num", c.resolvedBaseUrl), h("br"),
-            "Key：", c.apiKey.set ? h("code", c.apiKey.hint) : h("strong.text-pin", "未设置")]),
-          h("td.small.faint", `成功 ${number(c.successCount)} · 失败 ${number(c.failureCount)}`, c.lastOkAt ? h("br") : null,
-            c.lastOkAt ? `最近成功 ${dateTime(c.lastOkAt)}` : null,
-            c.lastError ? h("div.channel-error", { class: c.lastOkAt > c.lastErrorAt ? "is-recovered" : "", title: c.lastError },
-              `${c.lastOkAt > c.lastErrorAt ? "上次错误（已恢复）" : "最近错误"}：${c.lastError.slice(0, 80)}`) : null),
-          h("td.channel-actions",
-            h("button.btn.btn-sm", { type: "button", onclick: (e) => busy(e.currentTarget, async () => {
-              try {
-                const r = await api.post(`/api/admin/channels/${c.id}/test`, { mode: "ping" });
-                toast(`${r.message}${r.ms ? `（${r.ms} ms）` : ""}`, { type: r.ok ? "success" : "error" });
-              } catch (err) { toastError(err); }
-            }) }, "测试连接"),
-            c.kind !== "mock" ? h("button.btn.btn-sm", { type: "button", onclick: () => addModels(c, ctx, load) }, "添加模型") : null,
-            h("button.btn.btn-sm.btn-primary", { type: "button", onclick: () => editChannel(c, ctx, load) }, "编辑"),
-            h("button.btn.btn-sm.btn-ghost", { type: "button", onclick: async () => {
-              try { await api.put(`/api/admin/channels/${c.id}`, { enabled: !c.enabled }); load(); } catch (err) { toastError(err); }
-            } }, c.enabled ? "停用" : "启用"),
-            h("button.btn.btn-sm.btn-ghost.btn-danger", { type: "button", onclick: async () => {
-              if (!(await confirmDialog({ title: `删除渠道「${c.name}」？`, message: "它的模型会一起删除，清晰度分配里也会去掉。历史生成记录不受影响。", confirmText: "删除", danger: true }))) return;
-              try { await api.del(`/api/admin/channels/${c.id}`); load(); } catch (err) { toastError(err); }
-            } }, "删除"))),
-        h("tr.channel-models", h("td", { colSpan: 4 }, modelRows(c)))))));
+      h("colgroup", widths.map((w) => h("col", w ? { style: { width: w } } : {}))),
+      h("thead", h("tr", h("th", "模型"), h("th", "清晰度检测"), h("th", "接的画质"), h("th", "成本单价"), h("th", "调用"), h("th", "启用"), h("th"))),
+      ...data.items.map((c) => h("tbody.channel-group", { class: c.enabled ? "" : "is-off" },
+        channelHead(c),
+        c.kind === "mock" ? null
+          : c.models.length ? c.models.map((m) => modelRow(c, m))
+            : h("tr.model-row", h("td.model-empty", { colSpan: COLUMNS }, h("span.text-pin", "还没有模型，这个渠道不会接任务。"),
+              h("button.btn.btn-sm", { type: "button", onclick: () => addModels(c, ctx, load) }, "添加模型")))))));
   }
 
   load();
@@ -434,7 +485,7 @@ export async function render() {
         h("button.btn.btn-primary", { type: "button", onclick: () => editChannel({ kind: "openai" }, ctx, load) }, "添加 OpenAI 渠道")]),
     stale,
     routesBox,
-    section("渠道与模型", "尺寸一栏：✓ 检测通过，✗ 返回的图比要求的小，? 还没检测（按模型设置认为能出），— 最高清晰度没设到这一档。", list),
+    section("渠道与模型", "清晰度检测：✓ 通过，✗ 返回的图比要求的小，? 还没检测（按模型设置认为能出），— 最高清晰度没设到这一档。删除渠道或移除模型在「编辑渠道」「设置」里。", list),
     section("接入说明", null, h("ul.a-notes.small",
       h("li", "添加渠道时先填接口地址和 API Key，保存后从接口返回的模型列表里选要用的模型，可以多选。认识的模型会自动填好清晰度和尺寸设置；获取列表不产生费用。"),
       h("li", "“检测尺寸”按模型的最高清晰度生成一张低画质图（4K 没通过时再测一张 2K），看实际返回多大的图。不少中转站会忽略尺寸、只返回 1024 级别的图，这样的模型只接标准清晰度。真实任务返回的图偏小时也会自动标记。"),
