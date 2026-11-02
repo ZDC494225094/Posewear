@@ -761,9 +761,12 @@ export function seed(admin, { dryRun = true, ip = null } = {}) {
     .map((o) => ({ role, categoryId: o.categoryId })));
   const sampleCount = samples.reduce((n, x) => n + x.missing, 0);
   const assetCfg = settings.get("assets");
-  const usd = apiCostUsd({ quality: assetCfg.quality, size: flexibleSize("3:2", assetCfg.tier), n: plates.length })
-    + apiCostUsd({ quality: assetCfg.quality, size: flexibleSize("2:3", assetCfg.tier), n: outfits.length })
-    + apiCostUsd({ quality: c.quality, size: flexibleSize("2:3", c.tier), n: sampleCount });
+  // Priced on the channel each kind of job would go to first.
+  const assetChannel = channels.primaryChannel("standard", assetCfg.quality);
+  const sampleChannel = channels.primaryChannel(photoTier(c), c.quality);
+  const usd = apiCostUsd({ quality: assetCfg.quality, size: flexibleSize("3:2", assetCfg.tier), n: plates.length, channel: assetChannel })
+    + apiCostUsd({ quality: assetCfg.quality, size: flexibleSize("2:3", assetCfg.tier), n: outfits.length, channel: assetChannel })
+    + apiCostUsd({ quality: c.quality, size: flexibleSize("2:3", photoTier(c)), n: sampleCount, channel: sampleChannel });
   const result = { plates: plates.length, samples: sampleCount, outfits: outfits.length, estimatedUsd: Math.round(usd * 100) / 100 };
   if (dryRun) return result;
   // Outfits first so the samples can already use them when they run later; samples

@@ -216,7 +216,7 @@ async function saveResults(job, result, channel, size, short = false) {
     removeImages(stored);
     throw err;
   }
-  const cost = apiCostUsd({ usage: result.usage, quality: job.quality, size, n: images.length, model: channel.model });
+  const cost = apiCostUsd({ usage: result.usage, quality: job.quality, size, n: images.length, channel });
   try {
     recordResults(job, stored, channel, size, result, cost, short);
   } catch (err) {
@@ -310,13 +310,25 @@ const hasRoom = (c) => !c.options.maxConcurrency || (channelActive.get(c.id) || 
 // onPrepared: called once the inputs are ready and the job is about to use a channel.
 async function runJob(job, onPrepared = () => {}) {
   const gen = settings.get("generation");
+  const usable = channels.enabledChannels().filter((c) => c.kind === "mock" || c.apiKey);
+  // 画质: a studio work goes only to channels that take its 画质 (the admin can
+  // send 精细 to one model and 草稿 to another). Wedding photos, 超分 and asset
+  // jobs prefer them but use any channel rather than fail.
+  const takes = (c) => channels.takesQuality(c, job.quality);
+  const studio = job.kind === "work" && !job.shoot_id && !job.upscale_of;
+  if (studio && usable.length && !usable.some(takes)) {
+    const label = gen.qualities.find((q) => q.id === job.quality)?.label || job.quality;
+    fail(job, { code: "QUALITY_UNSUPPORTED", detail: `No enabled channel takes quality ${job.quality}`,
+      publicMessage: `生成渠道现在不接「${label}」画质，本次点数已退回，可以换个画质再试。` });
+    return;
+  }
+  const pool = studio ? usable.filter(takes) : usable;
   // Works and wedding photos at 2K or 4K, and 超分, go only to channels that
   // deliver that size; a fixed-size one would answer with a 1024-class image.
   // Asset jobs are resized to their spec, so any channel will do.
-  const usable = channels.enabledChannels().filter((c) => c.kind === "mock" || c.apiKey);
-  if (job.kind === "work" && job.tier !== "standard" && usable.length && !usable.some((c) => channels.serves(c, job.tier))) {
+  if (job.kind === "work" && job.tier !== "standard" && pool.length && !pool.some((c) => channels.serves(c, job.tier))) {
     // No channel delivers that size any more (one fell short since the job was queued).
-    const lower = TIERS.slice(0, TIER_RANK[job.tier]).reverse().find((t) => usable.some((c) => channels.serves(c, t)));
+    const lower = TIERS.slice(0, TIER_RANK[job.tier]).reverse().find((t) => pool.some((c) => channels.serves(c, t)));
     if (job.shoot_id && lower) {
       // A wedding album is finished at the largest size still delivered rather than left with gaps.
       job = { ...job, tier: lower, size: flexibleSize(job.ratio, lower) };
@@ -328,7 +340,9 @@ async function runJob(job, onPrepared = () => {}) {
     }
   }
   const needs = job.kind === "work" ? job.tier : "standard";
-  const candidates = usable.filter((c) => channels.serves(c, needs));
+  const fits = pool.filter((c) => channels.serves(c, needs));
+  const preferred = fits.filter(takes);
+  const candidates = preferred.length ? preferred : fits;
   if (!candidates.length) {
     fail(job, { code: "NO_CHANNEL", publicMessage: PUBLIC_MESSAGES.unavailable, detail: "No enabled channel with an API key" });
     return;
@@ -360,12 +374,15 @@ async function runJob(job, onPrepared = () => {}) {
   const safetyIdentifier = user ? sha256(`${config.appSecret}:user:${user.id}`).slice(0, 32) : undefined;
   const errors = [];
   for (const channel of free) {
-    const size = job.upscale_of ? job.size : sizeForChannel(job.ratio, job.tier, channel.options.sizeMode);
+    // An asset job may ask more than a channel draws; it gets the channel's largest.
+    const tier = channels.serves(channel, job.tier) ? job.tier : channels.maxTier(channel);
+    const size = job.upscale_of ? job.size
+      : channel.kind === "gemini" ? flexibleSize(job.ratio, tier) : sizeForChannel(job.ratio, tier, channel.options.sizeMode);
     channelActive.set(channel.id, (channelActive.get(channel.id) || 0) + 1);
     let result;
     try {
       result = await providerFor(channel).run(channel, {
-        prompt: job.prompt_final, images: inputs, size, quality: job.quality, n: job.n,
+        prompt: job.prompt_final, images: inputs, size, ratio: job.ratio, tier, quality: job.quality, n: job.n,
         moderation: gen.moderation, outputFormat: "png", outputCompression: gen.outputCompression,
         // Larger images take longer; timing out would pay for the image and then retry it.
         safetyIdentifier, timeoutSec: gen.requestTimeoutSec, timeoutScale: TIMEOUT_SCALE[job.tier] || 1
@@ -397,9 +414,9 @@ async function runJob(job, onPrepared = () => {}) {
     const got = await imageDims(result.images[0]);
     const delivered = got ? `${got[0]}x${got[1]}` : result.size && result.size !== "auto" ? result.size : size;
     const wanted = dims(size);
-    const short = job.tier !== "standard" && !!got && !!wanted && got[0] * got[1] < wanted[0] * wanted[1] * 0.8;
+    const short = tier !== "standard" && !!got && !!wanted && got[0] * got[1] < wanted[0] * wanted[1] * 0.8;
     if (short) {
-      channels.limitSizes(channel.id, { maxTier: deliveredTier(got[0] * got[1], job.ratio, job.tier),
+      channels.limitSizes(channel.id, { maxTier: deliveredTier(got[0] * got[1], job.ratio, tier),
         requested: size, delivered, since: job.started_at });
       log.warn(`Generation ${job.id}: channel #${channel.id} answered ${size} with ${delivered}`);
       if (job.upscale_of) {

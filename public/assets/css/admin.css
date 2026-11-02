@@ -73,6 +73,9 @@ body.admin #main { padding-bottom: 60px; min-height: 100vh; }
 .suffix { color: var(--label-3); font-size: 13px; white-space: nowrap; }
 
 .a-quick { align-items: center; margin-bottom: 4px; }
+/* Fields drawn by a page inside a schema form (channel prices) take part in its grid. */
+.a-contents { display: contents; }
+.stack-sm { display: grid; gap: 8px; }
 .preset-list { display: grid; gap: 8px; }
 .preset-row { display: grid; grid-template-columns: 130px 140px minmax(0, 1fr) auto; gap: 8px; align-items: center; }
 .prompt-layout { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 16px; align-items: start; }

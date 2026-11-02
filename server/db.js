@@ -627,7 +627,36 @@ const migrations = [
       if (!m) continue;
       update.run((outputTokens(Number(m[1]), Number(m[2]), r.quality) * price / 1e6) * (r.images || r.n || 1), r.id);
     }
-  }
+  },
+  // 10: Google Gemini (Nano Banana) channels. The kind CHECK can't be altered,
+  // so the table is rebuilt with the same rows and ids; no table references it.
+  `
+  CREATE TABLE channels_v10 (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('openai', 'gemini', 'mock')),
+    base_url TEXT NOT NULL DEFAULT '',
+    api_key_enc TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT 'gpt-image-2',
+    options TEXT NOT NULL DEFAULT '{}',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    priority INTEGER NOT NULL DEFAULT 0,
+    success_count INTEGER NOT NULL DEFAULT 0,
+    failure_count INTEGER NOT NULL DEFAULT 0,
+    last_ok_at INTEGER,
+    last_error TEXT,
+    last_error_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    size_limit TEXT
+  );
+  INSERT INTO channels_v10 (id, name, kind, base_url, api_key_enc, model, options, enabled, priority, success_count,
+      failure_count, last_ok_at, last_error, last_error_at, created_at, updated_at, size_limit)
+    SELECT id, name, kind, base_url, api_key_enc, model, options, enabled, priority, success_count,
+      failure_count, last_ok_at, last_error, last_error_at, created_at, updated_at, size_limit FROM channels;
+  DROP TABLE channels;
+  ALTER TABLE channels_v10 RENAME TO channels;
+  `
 ];
 
 export function migrate() {

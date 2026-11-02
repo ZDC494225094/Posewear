@@ -9,6 +9,7 @@ import { genCard, jobWatcher, cardSizeSwitch } from "../components/gen-card.js";
 import { openBoardDialog } from "../components/board.js";
 
 const RATIO_SHAPES = { "2:3": [2, 3], "3:4": [3, 4], "1:1": [1, 1], "4:3": [4, 3], "3:2": [3, 2], "9:16": [9, 16], "16:9": [16, 9] };
+const TIER_ORDER = ["standard", "hd", "uhd"];
 const PICKER_TITLE = { pose: "选择姿势", outfit: "选择服装", scene: "选择场景", item: "选择物品" };
 
 function ratioShape(ratio) {
@@ -56,6 +57,7 @@ export async function render(ctx) {
     realism: !!saved.realism,
     prompt: typeof saved.prompt === "string" ? saved.prompt : ""
   };
+  fitTier();
   // Scene and items sit behind "更多参考" until opened or used.
   let moreRefs = !!(saved.moreRefs || state.sceneAsset || state.items.length);
   // Uploads and works belong to whoever made them; drop them if the session changed.
@@ -458,7 +460,24 @@ export async function render(ctx) {
   function seg(name, options, value, onPick) {
     return h("div.seg", { role: "radiogroup", "aria-label": name },
       options.map((o) => h("button", { type: "button", role: "radio", "aria-checked": String(o.value === value),
-        "aria-pressed": String(o.value === value), onclick: () => onPick(o.value) }, o.content ?? o.text)));
+        "aria-pressed": String(o.value === value), disabled: !!o.disabled, title: o.title || null, onclick: () => onPick(o.value) }, o.content ?? o.text)));
+  }
+
+  // Each 画质 may go to different channels, which draw up to different tiers.
+  function tierFits(tier, quality = state.quality) {
+    const top = cfg.qualityTiers?.[quality];
+    return !top || TIER_ORDER.indexOf(tier) <= TIER_ORDER.indexOf(top);
+  }
+
+  function fitTier() {
+    if (!tierFits(state.tier)) state.tier = [...cfg.tiers].reverse().find((t) => tierFits(t.id))?.id || "standard";
+  }
+
+  function tierLimit() {
+    if (cfg.tiers.every((t) => tierFits(t.id))) return null;
+    const label = cfg.qualities.find((q) => q.id === state.quality)?.label || state.quality;
+    const top = cfg.tiers.find((t) => t.id === cfg.qualityTiers[state.quality])?.label || "标准";
+    return h("p.small.faint", `「${label}」画质最高出「${top}」，要更高的清晰度请换个画质。`);
   }
 
   function chips(name, options, value, onPick, { disabled = false } = {}) {
@@ -502,12 +521,13 @@ export async function render(ctx) {
             onclick: () => { state.ratio = r; update(); } }, ratioShape(r), r))),
         cfg.tiers.length > 1 ? null : tierNote()),
       cfg.tiers.length > 1 ? h("section.panel-sec", sectionHead("expand", "blue", "清晰度"),
-        seg("清晰度", cfg.tiers.map((t) => ({ value: t.id, content: [t.label, t.multiplier !== 1 ? h("span.chip-note", `×${t.multiplier}`) : null] })),
+        seg("清晰度", cfg.tiers.map((t) => ({ value: t.id, disabled: !tierFits(t.id),
+          content: [t.label, t.multiplier !== 1 ? h("span.chip-note", `×${t.multiplier}`) : null] })),
           state.tier, (v) => { state.tier = v; update(); }),
-        tierNote()) : null,
+        tierNote(), tierLimit()) : null,
       h("section.panel-sec", sectionHead("gem", "orange", "画质"),
         seg("画质", cfg.qualities.map((x) => ({ value: x.id, content: [x.label, h("span.chip-note", `${x.credits} 点`)] })),
-          state.quality, (v) => { state.quality = v; update(); })),
+          state.quality, (v) => { state.quality = v; fitTier(); update(); })),
       cfg.maxN > 1 ? h("section.panel-sec", sectionHead("stack", "teal", "张数"),
         seg("张数", Array.from({ length: cfg.maxN }, (_, i) => ({ value: i + 1, text: `${i + 1} 张` })), state.n, (v) => { state.n = v; update(); })) : null,
       h("button.btn.btn-ghost.board-link", { type: "button", onclick: () => {
@@ -631,7 +651,7 @@ export async function render(ctx) {
       if (err.code === "INSUFFICIENT_CREDITS") { store.refreshUser(); }
       toastError(err);
       // No channel delivers that size any more (it changed after the page loaded): redraw with the options left.
-      if (err.code === "TIER_UNSUPPORTED") store.refreshConfig().then(() => navigate(location.pathname + location.search, { replace: true }));
+      if (["TIER_UNSUPPORTED", "QUALITY_UNSUPPORTED"].includes(err.code)) store.refreshConfig().then(() => navigate(location.pathname + location.search, { replace: true }));
     }
   }
 

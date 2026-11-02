@@ -2,7 +2,7 @@ import { db } from "../db.js";
 import { encryptSecret, decryptSecret, maskSecret } from "../lib/crypto.js";
 import { badRequest } from "../lib/errors.js";
 import { DEFAULT_LEGAL } from "./legal-defaults.js";
-import { bestTier } from "./channels.js";
+import { bestTier, offeredQualities } from "./channels.js";
 import { flexibleSize, TIER_RANK } from "./sizes.js";
 
 // Every operator-configurable value, grouped as the admin pages present them.
@@ -666,6 +666,10 @@ export function publicConfig() {
   // 2K and 4K (and 超分 to them) are offered only as far as some channel delivers.
   const best = bestTier() || "standard";
   const tiers = gen.tiers.filter((t) => t.enabled && TIER_RANK[t.id] <= TIER_RANK[best]);
+  // Likewise 画质: only those some channel takes, each with the largest tier its channels draw.
+  const offered = offeredQualities();
+  const qualities = gen.qualities.filter((q) => q.enabled && offered.includes(q.id));
+  const shown = qualities.length ? qualities : gen.qualities.filter((q) => q.enabled);
   const providers = [];
   if (payment.alipay.enabled) providers.push("alipay");
   if (payment.wechat.enabled) providers.push("wechat");
@@ -687,11 +691,14 @@ export function publicConfig() {
       enabled: gen.enabled, maintenanceMessage: gen.maintenanceMessage,
       allowTextOnly: gen.allowTextOnly, allowOutfitUpload: gen.allowOutfitUpload,
       allowPersonPhoto: gen.allowPersonPhoto,
-      qualities: gen.qualities.filter((q) => q.enabled).map(({ id, label, credits }) => ({ id, label, credits })),
+      qualities: shown.map(({ id, label, credits }) => ({ id, label, credits })),
+      // The largest tier offered with each 画质, e.g. { low: "standard", high: "hd" }.
+      qualityTiers: Object.fromEntries(shown.map((q) => [q.id, tiers.filter((t) => TIER_RANK[t.id] <= TIER_RANK[bestTier(q.id) || "standard"]).at(-1)?.id || "standard"])),
       tiers: tiers.map(({ id, label, multiplier }) => ({ id, label, multiplier })),
       // Output size of every ratio at every offered tier, e.g. sizes["2:3"].hd = "1536x2304".
       sizes: Object.fromEntries(gen.ratios.map((r) => [r, Object.fromEntries(tiers.map((t) => [t.id, flexibleSize(r, t.id)]))])),
-      ratios: gen.ratios, defaultRatio: gen.defaultRatio, defaultQuality: gen.defaultQuality,
+      ratios: gen.ratios, defaultRatio: gen.defaultRatio,
+      defaultQuality: shown.some((q) => q.id === gen.defaultQuality) ? gen.defaultQuality : shown[0]?.id || gen.defaultQuality,
       defaultTier: tiers.some((t) => t.id === gen.defaultTier) ? gen.defaultTier : "standard", maxN: gen.maxN,
       styles: gen.styles.map(({ id, label }) => ({ id, label })),
       scenes: gen.scenes.map(({ id, label }) => ({ id, label })),

@@ -4,10 +4,11 @@ import { toast, toastError, busy } from "../../core/ui.js";
 import { pageHead, section, form, table, statusPill } from "../kit.js";
 
 const RATIOS = ["2:3", "3:4", "1:1", "4:3", "3:2", "9:16", "16:9"];
+const TIER_RANK = { standard: 0, hd: 1, uhd: 2 };
 
 const TIER_HELP = {
   standard: "约 100–180 万像素，如 1024 × 1536。始终开放，所有渠道都支持。",
-  hd: "约 300–370 万像素，如 1536 × 2304、2560 × 1440，是官方非实验尺寸里最大的一档。需要 gpt-image-2 或 2.5 渠道。",
+  hd: "约 300–370 万像素，如 1536 × 2304、2560 × 1440，是官方非实验尺寸里最大的一档。需要 gpt-image-2 / 2.5 或 Nano Banana Pro / 2 / 2.1 的渠道。",
   uhd: "约 800 万像素，如 2336 × 3504、3840 × 2160，接近模型上限 3840 × 2160。官方标为实验性，效果可能不稳定，出图也更慢。"
 };
 
@@ -34,12 +35,14 @@ function presetEditor(title, items, help) {
 function sizeOverview(data, getValue) {
   const node = h("div.a-field.is-wide.size-overview");
   let basis = "medium";
+  let costBy = "";   // "" for gpt-image-2's official price, else a channel id
   const money = (yuan) => `¥${yuan.toFixed(2)}`;
   function draw() {
     const v = getValue();
     const quality = v.qualities.find((q) => q.id === basis) || v.qualities[0];
     const rate = Number(v.usdToCny) || data.usdToCny;
     const tokenScale = (Number(v.tokenPriceUsd?.imageOutput) || data.imageOutputUsd) / data.imageOutputUsd;
+    const channel = (data.channels || []).find((c) => String(c.id) === costBy) || null;
     const perPoint = data.yuanPerPoint;
     const income = (points) => (!perPoint ? "" : perPoint.min === perPoint.max ? ` ≈ ${money(points * perPoint.min)}`
       : ` ≈ ${money(points * perPoint.min)}–${(points * perPoint.max).toFixed(2)}`);
@@ -49,22 +52,30 @@ function sizeOverview(data, getValue) {
         h("div.seg", { role: "radiogroup", "aria-label": "按画质估算" }, v.qualities.map((q) =>
           h("button", { type: "button", role: "radio", "aria-checked": String(q.id === basis), "aria-pressed": String(q.id === basis),
             onclick: () => { basis = q.id; draw(); } }, q.label)))),
+      data.channels?.length ? h("div.chips.a-quick", h("span.small.muted", "成本按："),
+        [["", "gpt-image-2 官方价"], ...data.channels.map((c) => [String(c.id), c.name])].map(([id, text]) =>
+          h("button.chip", { type: "button", "aria-pressed": String(id === costBy), onclick: () => { costBy = id; draw(); } }, text))) : null,
+      channel && !channel.qualities.includes(basis)
+        ? h("p.a-callout.small", `「${channel.name}」不接「${quality.label}」画质，这一档的作品不会发给它（在「AI 渠道」里设置）。`) : null,
       data.bestTier === "uhd" ? null : h("p.a-callout.small", data.bestTier === "hd"
         ? "现在的渠道最多只能出 2K，用户看不到 4K，也不能超分到 4K。"
-        : "现在没有能出 2K 或 4K 的渠道：用户只能选标准清晰度，不能超分，婚纱照按标准尺寸拍。需要 gpt-image-2 或 2.5 的渠道，尺寸模式选「自定义尺寸」，而且中转要真的按尺寸出图（见「AI 渠道」里的尺寸检测）。"),
+        : "现在没有能出 2K 或 4K 的渠道：用户只能选标准清晰度，不能超分，婚纱照按标准尺寸拍。需要 gpt-image-2 / 2.5（尺寸模式选「自定义尺寸」）或 Nano Banana Pro / 2 / 2.1 的渠道，而且中转要真的按尺寸出图（见「AI 渠道」里的尺寸检测）。"),
       table([
         { label: "画幅", render: (r) => (r.enabled ? h("strong.num", r.ratio) : h("span.faint", `${r.ratio}（未开放）`)) },
         ...v.tiers.map((t) => ({ label: t.enabled ? t.label : `${t.label}（未开放）`, render: (r) => {
           const cell = r.tiers[t.id];
-          const usd = cell.usd[basis] * tokenScale;
+          const usd = channel ? channel.usd[r.ratio][t.id][basis] : cell.usd[basis] * tokenScale;
+          const beyond = channel && TIER_RANK[t.id] > TIER_RANK[channel.maxTier];
           const points = Math.ceil((Number(quality.credits) || 0) * (Number(t.multiplier) || 1));
           return h("div.size-cell",
             h("span.size-cell-size.num", cell.size.replace("x", " × "), cell.experimental ? statusPill("实验", "tape") : null),
-            h("span.small.muted.num", `成本 ${money(usd * rate)}（$${usd.toFixed(3)}）`),
+            h("span.small.muted.num", beyond ? "这个渠道出不了" : `成本 ${money(usd * rate)}（$${usd.toFixed(3)}）`),
             h("span.small.muted.num", `收 ${points} 点${income(points)}`));
         } }))
       ], data.rows),
-      h("small", "成本按 OpenAI 公布的 gpt-image-2 计费方式估算，只算生成的这张图，参考图的输入另计；gpt-image-2.5 的单价相同，同一画质用的 token 数会有出入。中转按次收费时，以中转的价格为准。",
+      h("small", channel
+        ? `成本按「${channel.name}」的成本单价算${channel.pricing === "auto" ? "（按官方价）" : ""}，只算生成的这张图。Nano Banana 的实际尺寸和表里的略有不同，按同一档清晰度计价。`
+        : "成本按 OpenAI 公布的 gpt-image-2 计费方式估算，只算生成的这张图，参考图的输入另计；gpt-image-2.5 的单价相同，同一画质用的 token 数会有出入。各渠道自己的成本单价在「AI 渠道」里设置，上面可以切换。",
         perPoint ? `点数折合人民币按现有充值套餐算，1 点 ≈ ${money(perPoint.min)}${perPoint.max !== perPoint.min ? `–${perPoint.max.toFixed(2)}` : ""}。` : "",
         "超过 2560 × 1440 像素（约 369 万像素）的尺寸 OpenAI 标为实验性，效果可能不稳定。"));
   }
@@ -106,7 +117,7 @@ export async function render() {
     { key: "allowOutfitUpload", label: "允许上传自己的服装图", type: "switch" },
     { key: "allowPersonPhoto", label: "允许上传人物照片", type: "switch", help: "真人照片不能搭配敏感级服装、场景和物品，也不能用双人姿势，作品不能公开。" },
     { heading: "作品超分（2K / 4K）" },
-    { key: "upscale.enabled", label: "开放作品超分", type: "switch", help: "用户在作品大图里把一张图按原构图重绘到 2K 或 4K，结果是一个新作品，原图保留。只用支持自定义尺寸的渠道（gpt-image-2）。" },
+    { key: "upscale.enabled", label: "开放作品超分", type: "switch", help: "用户在作品大图里把一张图按原构图重绘到 2K 或 4K，结果是一个新作品，原图保留。只用能出 2K / 4K 的渠道（gpt-image-2 / 2.5、Nano Banana Pro / 2 / 2.1）。" },
     { key: "upscale.hdCredits", label: "超分到 2K 点数/张", type: "number", min: 0 },
     { key: "upscale.uhdCredits", label: "超分到 4K 点数/张", type: "number", min: 0, help: "默认和创作台同尺寸、标准画质的价格一样。4K 是实验性尺寸，模型费用约为 2K 的 1.8 倍。" },
     { key: "upscale.quality", label: "超分画质", type: "select", options: value.qualities.map((q) => [q.id, q.label]), help: "建议用标准。精细画质的细节更多，模型费用约为标准的 4 倍。" },
@@ -122,7 +133,8 @@ export async function render() {
     { key: "maxActivePerUser", label: "每人同时进行的任务", type: "number", min: 1, max: 50 },
     { key: "dailyLimitPerUser", label: "每人每日生成上限", type: "number", min: 0, help: "0 表示不限制。" },
     { heading: "成本估算（用于数据概览的毛利计算）" },
-    { key: "tokenPriceUsd.textInput", label: "文本输入 $/百万 token", type: "number", min: 0, step: 0.01 },
+    { key: "tokenPriceUsd.textInput", label: "文本输入 $/百万 token", type: "number", min: 0, step: 0.01,
+      help: "gpt-image-2 / 2.5 的官方单价。渠道的计价方式是“按官方价”时用这里；每个渠道自己的成本单价在「AI 渠道」里设置。" },
     { key: "tokenPriceUsd.imageInput", label: "图片输入 $/百万 token", type: "number", min: 0, step: 0.01 },
     { key: "tokenPriceUsd.imageOutput", label: "图片输出 $/百万 token", type: "number", min: 0, step: 0.01 },
     { key: "fallbackCostUsd.low", label: "gpt-image-1.x 无用量时 low 每张 $", type: "number", min: 0, step: 0.001, help: "渠道不返回用量时：gpt-image-2 和 2.5 按尺寸和画质计算输出 token；gpt-image-1.5 等旧模型用这里 1024 × 1024 的单价按面积估算。" },

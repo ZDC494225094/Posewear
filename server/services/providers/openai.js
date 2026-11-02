@@ -88,10 +88,8 @@ export async function run(channel, request) {
   return { images, usage: json.usage || null, size: json.size || request.size, revisedPrompt: json.data[0]?.revised_prompt || "" };
 }
 
-// Cheap connectivity check for the admin "test" button: GET /models costs nothing.
-export async function ping(channel) {
+async function getModels(channel) {
   const base = resolveBaseUrl(channel.base_url);
-  const started = Date.now();
   const timeoutMs = Math.max(20, channel.options.connectTimeoutSec || 30) * 1000;
   let res, raw;
   try {
@@ -101,11 +99,27 @@ export async function ping(channel) {
     });
     raw = await res.text();
   } catch (err) {
-    const perr = classifyTransportError(err, timeoutMs);
-    return { ok: false, code: perr.code, message: `无法连接：${perr.message}`, ms: Date.now() - started };
+    return { error: classifyTransportError(err, timeoutMs) };
   }
   let json = null;
   try { json = JSON.parse(raw); } catch { /* ignore */ }
+  return { res, raw, json };
+}
+
+// The relay's model list (GET /models; costs nothing), for picking a model.
+export async function listModels(channel) {
+  const { error, res, raw, json } = await getModels(channel);
+  if (error) throw error;
+  if (!res.ok) throw classifyHttpError(res.status, json, raw);
+  if (!Array.isArray(json?.data)) throw new ProviderError("transient", "Unexpected response body", { code: "BAD_RESPONSE", detail: raw.slice(0, 300) });
+  return json.data.map((m) => ({ id: String(m?.id || ""), name: "" }));
+}
+
+// Cheap connectivity check for the admin "test" button: GET /models costs nothing.
+export async function ping(channel) {
+  const started = Date.now();
+  const { error, res, raw, json } = await getModels(channel);
+  if (error) return { ok: false, code: error.code, message: `无法连接：${error.message}`, ms: Date.now() - started };
   if (!res.ok) {
     return { ok: false, status: res.status, message: json?.error?.message || raw.slice(0, 200) || `HTTP ${res.status}`, ms: Date.now() - started };
   }
@@ -117,3 +131,4 @@ export async function ping(channel) {
       : "连接成功，API Key 有效"
   };
 }
+

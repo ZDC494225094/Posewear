@@ -266,9 +266,15 @@ export function create(user, input, { ip }) {
   if (!channels.hasUsableChannel()) {
     throw new HttpError(503, "NO_CHANNEL", "生成服务尚未配置完成，请联系管理员");
   }
-  if (r.tier !== "standard" && !channels.tierAvailable(r.tier)) {
+  const qualityLabel = r.gen.qualities.find((q) => q.id === r.quality)?.label || r.quality;
+  if (!channels.qualityAvailable(r.quality)) {
+    throw new HttpError(503, "QUALITY_UNSUPPORTED", `当前的生成渠道不接「${qualityLabel}」画质，请换一个画质`);
+  }
+  if (r.tier !== "standard" && !channels.tierAvailable(r.tier, r.quality)) {
     const label = r.gen.tiers.find((t) => t.id === r.tier)?.label || r.tier;
-    throw new HttpError(503, "TIER_UNSUPPORTED", `当前的生成渠道出不了「${label}」的尺寸，请选择更低的清晰度`);
+    throw new HttpError(503, "TIER_UNSUPPORTED", channels.tierAvailable(r.tier)
+      ? `接「${qualityLabel}」画质的生成渠道出不了「${label}」的尺寸，请换个画质或选择更低的清晰度`
+      : `当前的生成渠道出不了「${label}」的尺寸，请选择更低的清晰度`);
   }
   checkCaps(user, r.gen);
 

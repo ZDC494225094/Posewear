@@ -392,7 +392,7 @@ export async function saveResults(job, result, channel, size) {
     await writeFiles(p.type, id, image, job.id);
     made.push(id);
   }
-  const cost = apiCostUsd({ usage: result.usage, quality: job.quality, size, n: images.length, model: channel.model });
+  const cost = apiCostUsd({ usage: result.usage, quality: job.quality, size, n: images.length, channel });
   tx(() => {
     made.forEach((id, i) => library.insertAsset(assetFields(job, p, id, i, made.length)));
     db.prepare(`UPDATE generations SET status = 'succeeded', finished_at = ?, channel_id = ?, model = ?, size = ?,
