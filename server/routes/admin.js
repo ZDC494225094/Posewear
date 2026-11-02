@@ -79,9 +79,10 @@ router.get("/admin/generation/sizes", (req, res) => {
       }))
     })),
     // The same images at each usable channel's own prices (its 成本单价).
-    channels: channels.enabledChannels().filter((c) => c.kind !== "mock" && c.apiKey).map((c) => ({
-      id: c.id, name: c.name, model: c.model, maxTier: channels.maxTier(c), qualities: c.options.qualities,
-      pricing: c.options.pricing.mode,
+    // Per model (each channel's models priced on their own).
+    channels: channels.usableTargets().filter((c) => c.kind !== "mock").map((c) => ({
+      id: c.modelId, channelId: c.id, name: `${c.name} · ${c.model}`, model: c.model, maxTier: channels.maxTier(c),
+      qualities: c.options.qualities, pricing: c.options.pricing.mode,
       usd: Object.fromEntries(settings.RATIOS.map((ratio) => [ratio, Object.fromEntries(["standard", "hd", "uhd"].map((tier) =>
         [tier, Object.fromEntries(["low", "medium", "high"].map((q) =>
           [q, apiCostUsd({ quality: q, size: flexibleSize(ratio, tier), n: 1, channel: c })]))]))]))
@@ -108,8 +109,8 @@ router.get("/admin/watermark-preview.png", async (req, res) => {
 
 router.get("/admin/channels", (req, res) => {
   const gen = settings.get("generation");
-  res.json({ items: channels.list(), models: MODEL_PROFILES, qualities: gen.qualities.map(({ id, label }) => ({ id, label })),
-    usdToCny: gen.usdToCny, tokenPriceUsd: gen.tokenPriceUsd });
+  res.json({ items: channels.list(), routes: channels.routes(), models: MODEL_PROFILES,
+    qualities: gen.qualities.map(({ id, label }) => ({ id, label })), usdToCny: gen.usdToCny, tokenPriceUsd: gen.tokenPriceUsd });
 });
 
 router.post("/admin/channels", (req, res) => {
@@ -120,7 +121,7 @@ router.post("/admin/channels", (req, res) => {
 
 router.put("/admin/channels/:id", (req, res) => {
   const channel = channels.update(Number(req.params.id), req.body || {});
-  audit(req, "channel.update", "channel", channel.id, { name: channel.name, model: channel.model, enabled: channel.enabled });
+  audit(req, "channel.update", "channel", channel.id, { name: channel.name, enabled: channel.enabled });
   res.json({ channel });
 });
 
@@ -149,69 +150,116 @@ router.post("/admin/channels/models", async (req, res) => {
   }
 });
 
-const TIER_TEXT = { standard: "标准", hd: "2K", uhd: "4K" };
+// A channel's models: add by ID, change one's settings, remove one.
+router.post("/admin/channels/:id/models", (req, res) => {
+  const id = Number(req.params.id);
+  const added = channels.addModels(id, req.body?.models);
+  audit(req, "channel.models_add", "channel", id, { models: req.body?.models });
+  res.status(201).json({ added, channel: channels.adminDto(id) });
+});
 
-// "ping" lists models (free); "generate" makes one real low-quality image;
-// "size" asks for one low-quality image at the largest tier the channel is set
-// up for (4K unless capped at 2K) to see how large it really draws, and records
-// it (relays often take the size and answer 1024-class).
-router.post("/admin/channels/:id/test", async (req, res) => {
-  const channel = channels.get(Number(req.params.id));
-  const mode = ["generate", "size"].includes(req.body?.mode) ? req.body.mode : "ping";
-  const provider = providerFor(channel);
-  if (mode === "ping") return res.json(await provider.ping(channel));
-  if (mode === "size" && channel.kind === "openai" && channel.options.sizeMode !== "flexible") {
-    return res.json({ ok: false, message: "尺寸模式不是「自定义尺寸」，这个渠道只接标准清晰度。改成自定义尺寸并保存后再检测。" });
-  }
-  if (mode === "size" && channels.capTier(channel) === "standard") {
-    return res.json({ ok: false, message: "这个渠道的最高清晰度设成了「标准」，不接 2K / 4K。模型支持的话，改成 2K 或 4K 并保存后再检测。" });
-  }
+router.put("/admin/channel-models/:id", (req, res) => {
+  const channelId = channels.updateModel(Number(req.params.id), req.body || {});
+  audit(req, "channel.model_update", "channel_model", req.params.id, req.body);
+  res.json({ channel: channels.adminDto(channelId) });
+});
+
+router.delete("/admin/channel-models/:id", (req, res) => {
+  const channelId = channels.removeModel(Number(req.params.id));
+  audit(req, "channel.model_delete", "channel_model", req.params.id);
+  res.json({ channel: channels.adminDto(channelId) });
+});
+
+// 清晰度分配: { standard: [modelId …], hd: […], uhd: […] }, each in the order to try.
+router.put("/admin/channel-routes", (req, res) => {
+  const routes = channels.setRoutes(req.body || {});
+  audit(req, "channel.routes", "channel", null, routes);
+  res.json({ routes });
+});
+
+const TIER_TEXT = { standard: "标准", hd: "2K", uhd: "4K" };
+const TEST_PROMPT = "A small ceramic cup of green tea on a wooden table, soft daylight, simple product photo.";
+const failText = (err) => (err instanceof ProviderError ? `${err.code || err.kind}：${err.message}` : err.message);
+
+// "generate" makes one real low-quality image. "size" checks which of 2K and
+// 4K a model really draws: one low-quality image at the largest tier it is set
+// up for (4K unless capped at 2K) and, when that comes back below 2K, one at
+// 2K. Relays often take the size and answer with a 1024-class image.
+async function testModel(req, t, mode) {
+  const provider = providerFor(t);
+  const gen = settings.get("generation");
   const started = Date.now();
-  if (mode === "size") {
-    const probe = channels.capTier(channel);
-    const size = flexibleSize("2:3", probe);
+  const draw = (ratio, tier, size) => provider.run(t, {
+    prompt: TEST_PROMPT, images: [], size, ratio, tier, quality: "low", n: 1, moderation: "auto", outputFormat: "png",
+    outputCompression: 90, safetyIdentifier: undefined, timeoutSec: gen.requestTimeoutSec, timeoutScale: tier === "standard" ? 1 : 2
+  });
+  if (mode === "generate") {
     try {
-      const result = await provider.run(channel, {
-        prompt: "A small ceramic cup of green tea on a wooden table, soft daylight, simple product photo.",
-        images: [], size, ratio: "2:3", tier: probe, quality: "low", n: 1, moderation: "auto", outputFormat: "png", outputCompression: 90,
-        safetyIdentifier: undefined, timeoutSec: settings.get("generation").requestTimeoutSec, timeoutScale: 2
-      });
-      channels.markSuccess(channel.id);
-      const meta = await sharp(result.images[0], { limitInputPixels: 80_000_000 }).metadata();
-      const delivered = `${meta.width}x${meta.height}`;
-      const tier = tierOfPixels(meta.width * meta.height, "2:3");
-      const reached = TIER_RANK[tier] >= TIER_RANK[probe];
-      if (reached) channels.clearSizeLimit(channel.id);
-      else channels.limitSizes(channel.id, { maxTier: tier, requested: size, delivered });
-      audit(req, "channel.size_check", "channel", channel.id, { requested: size, delivered });
-      return res.json({ ok: tier !== "standard", ms: Date.now() - started, tier,
-        message: reached ? `能出 ${TIER_TEXT[probe]}：要 ${size.replace("x", "×")}，返回了 ${delivered.replace("x", "×")}。`
-          : `要 ${size.replace("x", "×")}，只返回了 ${delivered.replace("x", "×")}，这个渠道最高只能出${TIER_TEXT[tier]}。` });
+      const size = sizeForChannel("1:1", "standard", t.options.sizeMode);
+      const result = await draw("1:1", "standard", size);
+      const final = await finalizeImage(result.images[0], { imageId: "test", generationId: "admin-test" });
+      channels.markSuccess(t);
+      return { ok: true, ms: Date.now() - started, size: result.size, usage: result.usage,
+        message: `生成成功，耗时 ${((Date.now() - started) / 1000).toFixed(1)} 秒`,
+        image: `data:image/webp;base64,${final.thumb.toString("base64")}` };
     } catch (err) {
-      const message = err instanceof ProviderError ? `${err.code || err.kind}：${err.message}` : err.message;
-      channels.markFailure(channel.id, message);
-      return res.json({ ok: false, ms: Date.now() - started, message: `检测失败：${message}` });
+      channels.markFailure(t, failText(err));
+      return { ok: false, ms: Date.now() - started, message: failText(err) };
     }
   }
-  try {
-    const size = sizeForChannel("1:1", "standard", channel.options.sizeMode);
-    const result = await provider.run(channel, {
-      prompt: "A small ceramic cup of green tea on a wooden table, soft daylight, simple product photo.",
-      images: [], size, ratio: "1:1", tier: "standard", quality: "low", n: 1, moderation: "auto", outputFormat: "png", outputCompression: 90,
-      safetyIdentifier: undefined, timeoutSec: settings.get("generation").requestTimeoutSec
-    });
-    const final = await finalizeImage(result.images[0], { imageId: "test", generationId: "admin-test" });
-    channels.markSuccess(channel.id);
-    res.json({
-      ok: true, ms: Date.now() - started, size: result.size, usage: result.usage,
-      message: `生成成功，耗时 ${((Date.now() - started) / 1000).toFixed(1)} 秒`,
-      image: `data:image/webp;base64,${final.thumb.toString("base64")}`
-    });
-  } catch (err) {
-    const message = err instanceof ProviderError ? `${err.code || err.kind}：${err.message}` : err.message;
-    channels.markFailure(channel.id, message);
-    res.json({ ok: false, ms: Date.now() - started, message });
+  if (t.kind === "openai" && t.options.sizeMode !== "flexible") {
+    return { ok: false, message: "尺寸模式不是「自定义尺寸」，这个模型只接标准清晰度。改成自定义尺寸并保存后再检测。" };
   }
+  const cap = channels.capTier(t);
+  if (cap === "standard") {
+    return { ok: false, message: "这个模型的最高清晰度设成了「标准」，不接 2K / 4K。模型支持的话，改成 2K 或 4K 并保存后再检测。" };
+  }
+  const sizes = {};
+  let best = "standard", last = null;
+  try {
+    for (const tier of cap === "uhd" ? ["uhd", "hd"] : ["hd"]) {
+      // 4K (or a 2K-class answer to it) already shows what 2K would do.
+      if (TIER_RANK[best] >= TIER_RANK[tier]) { sizes[tier] = { ok: true, inferred: true, at: Date.now() }; continue; }
+      const size = flexibleSize("2:3", tier);
+      const result = await draw("2:3", tier, size);
+      const meta = await sharp(result.images[0], { limitInputPixels: 80_000_000 }).metadata();
+      const reached = tierOfPixels(meta.width * meta.height, "2:3");
+      last = { requested: size, delivered: `${meta.width}x${meta.height}` };
+      sizes[tier] = { ok: TIER_RANK[reached] >= TIER_RANK[tier], ...last, at: Date.now() };
+      if (TIER_RANK[reached] > TIER_RANK[best]) best = reached;
+    }
+    channels.markSuccess(t);
+  } catch (err) {
+    channels.markFailure(t, failText(err));
+    return { ok: false, ms: Date.now() - started, message: `检测失败：${failText(err)}` };
+  }
+  const reachedCap = TIER_RANK[best] >= TIER_RANK[cap];
+  channels.recordSizes(t.modelId, sizes, reachedCap ? { ok: true } : { ok: false, limit: { maxTier: best, ...last, at: Date.now() } });
+  audit(req, "channel.size_check", "channel_model", t.modelId, { model: t.model, sizes });
+  const asked = sizes[cap]?.requested || last.requested;
+  const got = sizes[cap]?.delivered || last.delivered;
+  return { ok: best !== "standard", ms: Date.now() - started, tier: best, sizes,
+    message: reachedCap ? `能出 ${TIER_TEXT[cap]}：要 ${asked.replace("x", "×")}，返回了 ${got.replace("x", "×")}。`
+      : `要 ${last.requested.replace("x", "×")}，只返回了 ${last.delivered.replace("x", "×")}，这个模型最高只能出${TIER_TEXT[best]}。` };
+}
+
+// "ping" lists the channel's models (free). "generate" and "size" test its
+// first model; the admin page tests each model through /admin/channel-models.
+router.post("/admin/channels/:id/test", async (req, res) => {
+  const mode = ["generate", "size"].includes(req.body?.mode) ? req.body.mode : "ping";
+  const dto = channels.adminDto(Number(req.params.id));
+  const first = dto.models[0];
+  if (mode === "ping") {
+    const channel = channels.getChannel(dto.id);
+    return res.json(await providerFor(channel).ping({ ...channel, model: first?.model || "" }));
+  }
+  if (!first) return res.json({ ok: false, message: "这个渠道还没有模型，先添加模型。" });
+  res.json(await testModel(req, channels.getTarget(first.id), mode));
+});
+
+router.post("/admin/channel-models/:id/test", async (req, res) => {
+  const mode = req.body?.mode === "size" ? "size" : "generate";
+  res.json(await testModel(req, channels.getTarget(Number(req.params.id)), mode));
 });
 
 // ---------- users

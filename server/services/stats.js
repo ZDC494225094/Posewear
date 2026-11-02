@@ -21,11 +21,19 @@ function series(days, rows, fields) {
 }
 
 // Moderation work waiting for an admin: the nav badges, without the whole dashboard.
+// Published works waiting for an admin: all of them with 广场审核 on, else only
+// real-person works when those need approval.
+function pendingReview(safety) {
+  const scope = safety.showcaseReview ? "" : safety.realPersonPublic && safety.realPersonReview ? "AND person_kind = 'real'" : null;
+  if (scope === null) return 0;
+  return db.prepare(`SELECT COUNT(*) AS n FROM generations
+    WHERE is_public = 1 AND approved = 0 AND hidden = 0 AND deleted_at IS NULL ${scope}`).get().n;
+}
+
 export function pendingCounts() {
   return {
     pendingReports: db.prepare("SELECT COUNT(*) AS n FROM reports WHERE status = 'open'").get().n,
-    pendingReview: settings.get("safety").showcaseReview ? db.prepare(`SELECT COUNT(*) AS n FROM generations
-      WHERE is_public = 1 AND approved = 0 AND hidden = 0 AND deleted_at IS NULL`).get().n : 0,
+    pendingReview: pendingReview(settings.get("safety")),
     pendingAssets: db.prepare(`SELECT COUNT(*) AS n FROM assets
       WHERE review = 'pending' AND visibility = 'public' AND enabled = 1`).get().n,
     pendingVirtual: pendingVirtualCount()
@@ -108,8 +116,8 @@ export function warnings() {
   const list = [];
   const site = settings.get("site");
   const payment = settings.get("payment");
-  const enabled = channels.enabledChannels();
-  if (!enabled.length) list.push({ level: "error", text: "还没有启用任何 AI 渠道，用户无法生成。请到「AI 渠道」添加 gpt-image-2 的 API Key。", link: "/admin/channels" });
+  const enabled = channels.usableTargets();
+  if (!enabled.length) list.push({ level: "error", text: "还没有可用的 AI 渠道和模型，用户无法生成。请到「AI 渠道」添加渠道、填入 API Key 并添加模型。", link: "/admin/channels" });
   else if (enabled.every((c) => c.kind === "mock")) list.push({ level: "warning", text: "当前只启用了模拟渠道，生成结果是占位图，不会调用真实模型。", link: "/admin/channels" });
   if (config.appSecretGenerated) list.push({ level: "warning", text: "APP_SECRET 为自动生成并保存在 storage/.app-secret。请在 .env 中固定它，并与数据一起备份，否则已保存的密钥将无法解密。" });
   if (!site.publicBaseUrl) list.push({ level: "warning", text: "未设置站点公网地址，支付回调和邮件链接可能不正确。", link: "/admin/site" });

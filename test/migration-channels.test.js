@@ -1,5 +1,6 @@
 // Migration 10 rebuilds the channels table so it can hold Gemini channels,
-// keeping every row, its id and what the size check learned.
+// keeping every row and its id; migration 12 moves each channel's model, with
+// its model settings and what the size check learned, into channel_models.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -10,7 +11,7 @@ import { startApp } from "./helpers.js";
 
 const Database = createRequire(import.meta.url)("better-sqlite3");
 
-test("migration 10 keeps the channels and lets them be Gemini channels", async () => {
+test("migrations 10 and 12 keep the channels, let them be Gemini channels and give each its model", async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "posewear-mig10-"));
   let app = await startApp({ env: { DATA_DIR: dataDir }, importUpstream: false });
   await app.stop();
@@ -37,11 +38,15 @@ test("migration 10 keeps the channels and lets them be Gemini channels", async (
   app = await startApp({ env: { DATA_DIR: dataDir }, importUpstream: false });
   await app.stop();
   const after = new Database(path.join(dataDir, "posewear.db"));
-  assert.ok(after.pragma("user_version", { simple: true }) >= 10);
-  const rows = after.prepare("SELECT id, name, kind, model, options, priority, success_count, size_limit FROM channels ORDER BY id").all();
+  assert.ok(after.pragma("user_version", { simple: true }) >= 12);
+  const rows = after.prepare("SELECT id, name, kind, options, priority, success_count FROM channels ORDER BY id").all();
   assert.deepEqual(rows.map((r) => [r.id, r.name, r.kind, r.priority, r.success_count]), [[3, "relay", "openai", 5, 42], [7, "mock", "mock", 0, 0]]);
-  assert.equal(JSON.parse(rows[0].size_limit).delivered, "1024x1536");
-  assert.equal(JSON.parse(rows[0].options).sizeMode, "auto");
+  // The model, its size mode and the size check's finding now belong to the model; the channel keeps how to reach the API.
+  const models = after.prepare("SELECT channel_id, model, options, size_limit, success_count FROM channel_models WHERE channel_id IN (3, 7) ORDER BY channel_id").all();
+  assert.deepEqual(models.map((m) => [m.channel_id, m.model, m.success_count]), [[3, "gpt-image-2.5-sunburst", 42], [7, "mock", 0]]);
+  assert.equal(JSON.parse(models[0].options).sizeMode, "auto");
+  assert.equal(JSON.parse(models[0].size_limit).delivered, "1024x1536");
+  assert.equal(JSON.parse(rows[0].options).sizeMode, undefined);
   after.prepare("INSERT INTO channels (name, kind, created_at, updated_at) VALUES ('g', 'gemini', 1, 1)").run();
   after.close();
   fs.rmSync(dataDir, { recursive: true, force: true });

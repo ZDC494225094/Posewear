@@ -23,11 +23,14 @@ export async function render() {
     { key: "aigcMetadata", label: "写入隐式标识（文件元数据 AIGC 字段）", type: "switch", help: "PNG 写入 iTXt，WebP/JPEG 写入 XMP，字段按 GB 45438-2025 组织。" },
     { heading: "灵感广场" },
     { key: "showcaseEnabled", label: "开放灵感广场", type: "switch" },
-    { key: "showcaseReview", label: "发布需审核", type: "switch", help: "开启后，用户发布的作品要在「举报与审核」里通过后才会公开。" }
+    { key: "showcaseReview", label: "发布需审核", type: "switch", help: "开启后，用户发布的作品要在「举报与审核」里通过后才会公开。" },
+    { key: "realPersonPublic", label: "允许公开用了真人照片的作品", type: "switch",
+      help: "用户每次公开前都要确认照片中的人同意公开展示（依据《民法典》肖像权和深度合成相关规定），同意时间会记录在作品上。人物原照片不会公开，只展示生成结果。" },
+    { key: "realPersonReview", label: "真人照片作品需审核", type: "switch", help: "开启后，用了真人照片的作品即使关闭了上面的「发布需审核」，也要管理员在「生成记录」里审核通过后才会公开或出现在首页推荐。建议保持开启。" }
   ], { title: "内容安全", after: refreshPreview });
   return h("div",
     pageHead("内容安全", "素材分级、人物照片、违禁词、AI 生成标识和广场审核。"),
-    h("p.a-callout.small", "以下规则写在代码里，不能关闭：限制级素材不会发给模型；使用真人照片时不能搭配敏感级服装、场景和物品，也不能搭配双人姿势（敏感级姿势可以用）；使用人物照片的作品不能公开或推荐；上传人物照片必须勾选授权声明。"),
+    h("p.a-callout.small", "以下规则写在代码里，不能关闭：限制级素材不会发给模型；使用真人照片时不能搭配敏感级服装、场景和物品，也不能搭配双人姿势（敏感级姿势可以用）；上传人物照片必须勾选授权声明；公开用了真人照片的作品前必须确认照片中的人同意。"),
     safety,
     section("水印预览", "保存后刷新。如果文字显示为方框，说明服务器缺少中文字体（Docker 镜像已内置；Linux 主机请安装 fonts-noto-cjk）。", preview));
 }

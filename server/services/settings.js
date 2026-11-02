@@ -132,7 +132,11 @@ export const DEFAULTS = {
     watermark: { enabled: true, text: "AI生成", position: "bottom-right", opacity: 0.72 },
     aigcMetadata: true,
     showcaseEnabled: true,
-    showcaseReview: false
+    showcaseReview: false,
+    // Works made from a real person's photo: publishable once the owner confirms
+    // the person agreed, and shown only after an admin approves them.
+    realPersonPublic: true,
+    realPersonReview: true
   },
   // Browsing the library: users who have not recharged see the first freeLimit
   // assets of each type; the rest show locked until they recharge.
@@ -555,7 +559,9 @@ function sanitize(group, v) {
         },
         aigcMetadata: flag(v.aigcMetadata, d.aigcMetadata),
         showcaseEnabled: flag(v.showcaseEnabled, d.showcaseEnabled),
-        showcaseReview: flag(v.showcaseReview, d.showcaseReview)
+        showcaseReview: flag(v.showcaseReview, d.showcaseReview),
+        realPersonPublic: flag(v.realPersonPublic, d.realPersonPublic),
+        realPersonReview: flag(v.realPersonReview, d.realPersonReview)
       };
     }
     case "library":
@@ -709,7 +715,7 @@ export function publicConfig() {
       personRetentionDays: safety.personRetentionDays
     },
     payment: { providers },
-    showcase: { enabled: safety.showcaseEnabled },
+    showcase: { enabled: safety.showcaseEnabled, realPersonPublic: safety.realPersonPublic, realPersonReview: safety.realPersonReview },
     wedding: { enabled: get("wedding").enabled && gen.enabled },
     library: { originalDownload: library.originalDownload, showSuggestive: safety.showSuggestive,
       lockEnabled: library.lockEnabled, freeLimit: library.freeLimit, unlockMinYuan: library.unlockMinYuan },

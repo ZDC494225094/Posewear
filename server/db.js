@@ -656,7 +656,65 @@ const migrations = [
       failure_count, last_ok_at, last_error, last_error_at, created_at, updated_at, size_limit FROM channels;
   DROP TABLE channels;
   ALTER TABLE channels_v10 RENAME TO channels;
-  `
+  `,
+  // 11: works made from a real person's photo can be published; when the owner
+  // confirmed that the person agreed to it is kept with the work. (11 and 12
+  // check what exists, so a database set back to an older version can rerun them.)
+  (conn) => {
+    if (!conn.prepare("SELECT 1 FROM pragma_table_info('generations') WHERE name = 'publish_consent_at'").get()) {
+      conn.exec("ALTER TABLE generations ADD COLUMN publish_consent_at INTEGER");
+    }
+  },
+  // 12: a channel offers several models. Each channel's model, its model-level
+  // settings (size mode, input_fidelity, largest tier, 画质, cost) and what the
+  // size check learned move to channel_models; the channel keeps how to reach
+  // the API. tier_routes is 清晰度分配: which models serve which tier, in order.
+  // channels.model and channels.size_limit stay but are no longer read.
+  // Rebuilding channels later would cascade-delete its models: turn foreign
+  // keys off for that.
+  (conn) => {
+    conn.exec(`
+    CREATE TABLE IF NOT EXISTS channel_models (
+      id INTEGER PRIMARY KEY,
+      channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+      model TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      sort INTEGER NOT NULL DEFAULT 0,
+      options TEXT NOT NULL DEFAULT '{}',
+      sizes TEXT,
+      size_limit TEXT,
+      success_count INTEGER NOT NULL DEFAULT 0,
+      failure_count INTEGER NOT NULL DEFAULT 0,
+      last_ok_at INTEGER,
+      last_error TEXT,
+      last_error_at INTEGER,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE (channel_id, model)
+    );
+    CREATE INDEX IF NOT EXISTS idx_channel_models_channel ON channel_models(channel_id, sort);
+    CREATE TABLE IF NOT EXISTS tier_routes (
+      tier TEXT NOT NULL CHECK (tier IN ('standard', 'hd', 'uhd')),
+      model_id INTEGER NOT NULL REFERENCES channel_models(id) ON DELETE CASCADE,
+      sort INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (tier, model_id)
+    );
+    `);
+    const modelKeys = ["sizeMode", "inputFidelity", "maxTier", "qualities", "pricing"];
+    const insert = conn.prepare(`INSERT OR IGNORE INTO channel_models (channel_id, model, enabled, sort, options, size_limit,
+      success_count, failure_count, last_ok_at, last_error, last_error_at, created_at, updated_at)
+      VALUES (?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const keep = conn.prepare("UPDATE channels SET options = ? WHERE id = ?");
+    for (const c of conn.prepare("SELECT * FROM channels").all()) {
+      let options = {};
+      try { options = JSON.parse(c.options || "{}"); } catch { /* defaults */ }
+      const forModel = {}, forChannel = {};
+      for (const [key, value] of Object.entries(options)) (modelKeys.includes(key) ? forModel : forChannel)[key] = value;
+      insert.run(c.id, c.model || "gpt-image-2", JSON.stringify(forModel), c.size_limit, c.success_count, c.failure_count,
+        c.last_ok_at, c.last_error, c.last_error_at, c.created_at, c.updated_at);
+      keep.run(JSON.stringify(forChannel), c.id);
+    }
+  }
 ];
 
 export function migrate() {

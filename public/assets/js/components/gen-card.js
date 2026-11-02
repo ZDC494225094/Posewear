@@ -14,18 +14,19 @@ function waitingView(gen) {
   const bar = h("div.progress", { role: "progressbar", "aria-label": "生成进度", "aria-valuemin": 0, "aria-valuemax": 100 }, fill);
   const node = h("div.gen-wait", { style: { aspectRatio: gen.ratio.replace(":", " / ") } }, h("div.spinner"), text, bar);
   function update() {
+    const elapsed = Math.max(0, (Date.now() - (gen.startedAt || gen.createdAt)) / 1000);
     if (gen.status === "queued") {
       fill.style.width = "4%";
-      text.textContent = gen.n > 1 ? `排队中 · ${gen.n} 张` : "排队中";
+      // Started once already (back for a retry or a free channel): the clock keeps running.
+      text.textContent = gen.startedAt ? `排队中 · ${Math.round(elapsed)} 秒` : gen.n > 1 ? `排队中 · ${gen.n} 张` : "排队中";
       return;
     }
-    const elapsed = Math.max(0, (Date.now() - (gen.startedAt || gen.createdAt)) / 1000);
     const expected = (EXPECTED_SECONDS[gen.quality] || 55) * (gen.tier === "hd" ? 1.3 : gen.tier === "uhd" ? 1.8 : 1) * (1 + (gen.n - 1) * 0.25);
     // Approaches 94% asymptotically; the real result replaces this view.
     const pct = Math.min(94, 6 + 88 * (1 - Math.exp(-elapsed / (expected * 0.6))));
     fill.style.width = `${pct.toFixed(1)}%`;
     bar.setAttribute("aria-valuenow", String(Math.round(pct)));
-    text.textContent = `${gen.upscaleOf ? "正在超分" : `正在生成${gen.n > 1 ? ` ${gen.n} 张` : ""}`} · ${Math.round(elapsed)} 秒`;
+    text.textContent = `${gen.upscaleOf ? "正在超分" : `正在生成${gen.n > 1 ? ` ${gen.n} 张` : ""}`} · ${Math.round(elapsed)} 秒${gen.attempts > 1 ? ` · 第 ${gen.attempts} 次尝试` : ""}`;
   }
   update();
   const timer = setInterval(update, 1000);
@@ -33,6 +34,24 @@ function waitingView(gen) {
 }
 
 const PERSON_TEXT = { real: "真人照片", virtual: "虚拟人" };
+
+// Works made from a real person's photo can go public when the site allows it,
+// after the owner confirms the person agreed; an admin may still review them.
+const canPublish = (gen) => store.config.showcase.enabled && gen.status === "succeeded"
+  && (gen.personKind !== "real" || store.config.showcase.realPersonPublic);
+
+async function publishWork(gen, isPublic) {
+  const real = gen.personKind === "real";
+  if (isPublic && real && !(await confirmDialog({
+    title: "公开用了真人照片的作品？",
+    message: `其他人会在灵感广场看到这张作品，人物原照片不会公开。请确认照片中的人（或你本人）同意把作品公开展示，否则可能侵犯他人的肖像权。${store.config.showcase.realPersonReview ? "作品需要管理员审核通过后才会展示。" : ""}`,
+    confirmText: "照片中的人同意，公开"
+  }))) return null;
+  const { generation } = await api.post(`/api/generations/${gen.id}/publish`, { public: isPublic, portraitConsent: isPublic && real });
+  toast(!generation.isPublic ? "已取消公开"
+    : real && store.config.showcase.realPersonReview && !generation.approved ? "已提交，管理员审核通过后会出现在灵感广场" : "已发布到灵感广场", { type: "success" });
+  return generation;
+}
 
 // Every reference a work used, labelled: [label, thumb url or null, chip text].
 export function refEntries(refs = {}) {
@@ -108,7 +127,7 @@ export function reuseInStudio(gen) {
 // It counts as virtual unless the work itself used a real person's photo.
 export function useAsPerson(gen, img) {
   draft.patch({ person: { source: "image", id: img.id, url: img.thumb, virtual: gen.personKind !== "real" } });
-  toast(gen.personKind === "real" ? "已把这张图设为人物（含真人照片，作品仅自己可见）" : "已把这张图设为人物（虚拟人）", { type: "success" });
+  toast(gen.personKind === "real" ? "已把这张图设为人物（含真人照片）" : "已把这张图设为人物（虚拟人）", { type: "success" });
   navigate("/studio");
 }
 
@@ -184,10 +203,9 @@ export function genCard(gen, { onChange, keep, onCreated } = {}) {
         gen.images.length > 1 ? h("span.gen-count", `${gen.images.length} 张`) : null);
     }
     const done = gen.status !== "queued" && gen.status !== "running";
-    const canPublish = store.config.showcase.enabled && gen.status === "succeeded" && gen.personKind !== "real";
     const actions = h("div.gen-actions",
       done ? actionButton("redo", "blue", "再来一次", () => reuseInStudio(gen)) : null,
-      canPublish ? actionButton("share", "purple", gen.isPublic ? "取消公开" : "公开", togglePublic) : null,
+      canPublish(gen) ? actionButton("share", "purple", gen.isPublic ? "取消公开" : "公开", togglePublic) : null,
       done ? actionButton("heart", "pink", gen.favorite ? "取消收藏" : "收藏", () => setFlag({ favorite: !gen.favorite }), { pressed: gen.favorite }) : null,
       done ? actionButton(gen.userHidden ? "eye" : "eyeOff", "gray", gen.userHidden ? "取消隐藏" : "隐藏", () => setFlag({ hidden: !gen.userHidden })) : null,
       done ? actionButton("trash", "red", "删除", remove) : null);
@@ -219,11 +237,11 @@ export function genCard(gen, { onChange, keep, onCreated } = {}) {
 
   async function togglePublic() {
     try {
-      const { generation } = await api.post(`/api/generations/${gen.id}/publish`, { public: !gen.isPublic });
+      const generation = await publishWork(gen, !gen.isPublic);
+      if (!generation) return;
       gen = generation;
       render();
       onChange?.(gen);
-      toast(gen.isPublic ? "已发布到灵感广场" : "已取消公开", { type: "success" });
     } catch (err) { toastError(err); }
   }
 
@@ -322,15 +340,14 @@ export function openViewer(gen, start = 0, { onChange, onCreated } = {}) {
   const items = gen.images.map((img, i) => ({ src: img.view || img.url, zoomSrc: img.url, alt: `生成结果 ${i + 1}`, img }));
   return lightbox(items, start, {
     renderAside: (item, { close }) => {
-      const canPublish = store.config.showcase.enabled && gen.personKind !== "real";
-      const publish = canPublish ? h("button.btn.btn-block", { type: "button", onclick: async (e) => {
+      const publish = canPublish(gen) ? h("button.btn.btn-block", { type: "button", onclick: async (e) => {
         const button = e.currentTarget;
         try {
-          const { generation } = await api.post(`/api/generations/${gen.id}/publish`, { public: !gen.isPublic });
+          const generation = await publishWork(gen, !gen.isPublic);
+          if (!generation) return;
           gen = generation;
           onChange?.(gen);
           button.replaceChildren(cicon("share", "purple"), gen.isPublic ? "取消公开" : "发布到灵感广场");
-          toast(gen.isPublic ? "已发布到灵感广场" : "已取消公开", { type: "success" });
         } catch (err) { toastError(err); }
       } }, cicon("share", "purple"), gen.isPublic ? "取消公开" : "发布到灵感广场") : null;
       const allowPerson = store.config.generation.allowPersonPhoto || gen.personKind !== "real";
@@ -350,7 +367,9 @@ export function openViewer(gen, start = 0, { onChange, onCreated } = {}) {
           allowPerson ? h("button.btn.btn-block", { type: "button", onclick: () => { close(); useAsPerson(gen, item.img); } },
             cicon("person", "green"), "用这张图作人物继续创作") : null,
           publish,
-          gen.personKind === "real" ? h("p.small.muted", "使用了真人照片的作品仅自己可见，不能公开。") : null,
+          gen.personKind === "real" ? h("p.small.muted", !store.config.showcase.realPersonPublic ? "使用了真人照片的作品仅自己可见，不能公开。"
+            : gen.isPublic && !gen.approved && store.config.showcase.realPersonReview ? "已提交公开，管理员审核通过后才会展示。人物原照片不会公开。"
+              : "用了真人照片：公开前需要确认照片中的人同意，人物原照片不会公开。") : null,
           h("button.btn.btn-ghost.btn-block", { type: "button", onclick: close }, "关闭")));
     }
   });

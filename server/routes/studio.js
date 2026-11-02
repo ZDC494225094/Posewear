@@ -98,7 +98,8 @@ router.post("/generations/:id/upscale", requireUser, (req, res) => {
 });
 
 router.post("/generations/:id/publish", requireUser, (req, res) => {
-  res.json({ generation: generations.setPublic(req.user, req.params.id, v.bool(req.body?.public)) });
+  res.json({ generation: generations.setPublic(req.user, req.params.id, v.bool(req.body?.public),
+    { portraitConsent: req.body?.portraitConsent === true }) });
 });
 
 router.post("/reports", requireUser, (req, res) => {

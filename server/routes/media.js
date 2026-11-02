@@ -130,13 +130,15 @@ async function viewFile(row) {
 router.get("/gen/:imageId/:variant", async (req, res) => {
   const { imageId, variant } = req.params;
   if (!["full", "thumb", "view"].includes(variant)) throw notFound();
-  const row = db.prepare(`SELECT i.*, g.user_id AS owner, g.is_public, g.hidden, g.deleted_at, g.approved
+  const row = db.prepare(`SELECT i.*, g.user_id AS owner, g.is_public, g.hidden, g.deleted_at, g.approved, g.person_kind
     FROM generation_images i JOIN generations g ON g.id = i.generation_id WHERE i.id = ?`).get(String(imageId));
   if (!row || row.deleted_at) throw notFound("图片不存在");
   const isOwner = req.user && req.user.id === row.owner;
   const isAdmin = req.user?.role === "admin";
-  const review = settings.get("safety").showcaseReview;
-  const isPublic = row.is_public && !row.hidden && (!review || row.approved);
+  const safety = settings.get("safety");
+  // The showcase's rules, real-person works included (see generations.realPersonShown).
+  const realOk = row.person_kind !== "real" || (safety.realPersonPublic && (!safety.realPersonReview || row.approved));
+  const isPublic = row.is_public && !row.hidden && (!safety.showcaseReview || row.approved) && realOk;
   if (!isOwner && !isAdmin && !isPublic) throw notFound("图片不存在");
   const file = variant === "view" ? await viewFile(row) : imageFile(variant === "thumb" ? row.thumb_path : row.path);
   const site = settings.get("site").name.replace(/[^\p{L}\p{N}_-]+/gu, "") || "posewear";

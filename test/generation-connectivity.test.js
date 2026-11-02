@@ -77,7 +77,7 @@ test("the full request deadline still bounds response reading", async (t) => {
 });
 
 test("a real worker retries a broken response, reports a network error and refunds once", async (t) => {
-  let requests = 0;
+  let requests = 0, firstRequestAt = 0;
   const server = http.createServer(async (req, res) => {
     for await (const chunk of req) { /* consume the complete local request */ }
     if (req.url === "/v1/models") {
@@ -86,6 +86,7 @@ test("a real worker retries a broken response, reports a network error and refun
       return;
     }
     requests++;
+    firstRequestAt ||= Date.now();
     res.writeHead(200, { "Content-Type": "application/json" });
     res.write('{"data":');
     setTimeout(() => res.destroy(), 30);
@@ -130,6 +131,9 @@ test("a real worker retries a broken response, reports a network error and refun
   assert.equal(failed.refunded, failed.cost);
   assert.equal((await user.get("/api/me")).data.user.credits, balance);
   assert.equal(requests, 2, "the transport must not add hidden POST retries");
+  // The retry keeps the first start time, so the studio's clock doesn't restart.
+  assert.ok(failed.startedAt <= firstRequestAt, "started_at is the first attempt's");
+  assert.equal(failed.attempts, 2);
   assert.equal(failed.errorDetail, undefined, "raw diagnostics are admin-only");
   const list = (await admin.get(`/api/admin/generations?q=${id}`)).data;
   const detail = list.items.find((g) => g.id === id);

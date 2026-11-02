@@ -11,7 +11,9 @@
 // response that takes 1.5 s, "[fake:1k]" for a relay that ignores the
 // requested size and always answers 1024×1024, "[fake:cap2048]" for one that
 // keeps the shape but caps the long edge at 2048, or "[fake:nousage]" for a relay
-// that returns no token usage. With keepBodies, recorded requests keep their files.
+// that returns no token usage. A model ID ending in "-1k" always answers
+// 1024×1024 and one containing "-capNNNN" caps the long edge at NNNN, for size
+// checks (their prompt is fixed). With keepBodies, recorded requests keep their files.
 import http from "node:http";
 import { pathToFileURL } from "node:url";
 import sharp from "sharp";
@@ -175,9 +177,11 @@ export function createFakeOpenAI({ log = false, keepBodies = false } = {}) {
       return json(res, 400, { error: { message: "input_fidelity is not supported for this model", type: "invalid_request_error", code: "unsupported_parameter" } });
     }
 
-    let [w, h] = (prompt.includes("[fake:1k]") ? "1024x1024" : String(fields.size || "1024x1024")).split("x").map(Number);
-    if (prompt.includes("[fake:cap2048]") && Math.max(w, h) > 2048) {
-      const k = 2048 / Math.max(w, h);
+    const model = String(fields.model || "");
+    let [w, h] = (prompt.includes("[fake:1k]") || /-1k$/.test(model) ? "1024x1024" : String(fields.size || "1024x1024")).split("x").map(Number);
+    const cap = prompt.includes("[fake:cap2048]") ? 2048 : Number(/-cap(\d{3,4})/.exec(model)?.[1]) || 0;
+    if (cap && Math.max(w, h) > cap) {
+      const k = cap / Math.max(w, h);
       [w, h] = [Math.round(w * k), Math.round(h * k)];
     }
     const n = Number(fields.n || 1);

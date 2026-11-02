@@ -55,7 +55,9 @@ export function stats() {
 
 // Oldest queued job, preferring users with nothing running, so one large
 // order (a wedding album, a batch of assets) doesn't hold up everyone else.
-const claimSql = (fair) => db.prepare(`UPDATE generations SET status = 'running', started_at = ?, attempts = attempts + 1
+// started_at is the first start: a retry or a wait for a free channel doesn't
+// restart the clock the studio shows.
+const claimSql = (fair) => db.prepare(`UPDATE generations SET status = 'running', started_at = COALESCE(started_at, ?), attempts = attempts + 1
   WHERE id = (SELECT id FROM generations WHERE status = 'queued' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
     ${fair ? "AND user_id NOT IN (SELECT value FROM json_each(?))" : ""}
     ORDER BY created_at LIMIT 1)
@@ -310,7 +312,8 @@ const hasRoom = (c) => !c.options.maxConcurrency || (channelActive.get(c.id) || 
 // onPrepared: called once the inputs are ready and the job is about to use a channel.
 async function runJob(job, onPrepared = () => {}) {
   const gen = settings.get("generation");
-  const usable = channels.enabledChannels().filter((c) => c.kind === "mock" || c.apiKey);
+  // Each candidate is a channel with one of its models (a "target").
+  const usable = channels.usableTargets();
   // 画质: a studio work goes only to channels that take its 画质 (the admin can
   // send 精细 to one model and 草稿 to another). Wedding photos, 超分 and asset
   // jobs prefer them but use any channel rather than fail.
@@ -339,10 +342,14 @@ async function runJob(job, onPrepared = () => {}) {
       return;
     }
   }
-  const needs = job.kind === "work" ? job.tier : "standard";
-  const fits = pool.filter((c) => channels.serves(c, needs));
-  const preferred = fits.filter(takes);
-  const candidates = preferred.length ? preferred : fits;
+  // 清晰度分配 decides the order: the models assigned to the job's tier, or
+  // every model that draws it. An asset job draws at its configured tier when a
+  // model can, else at standard size like before.
+  const assigned = channels.routes();
+  const ordered = job.kind === "work" ? channels.routeOrder(pool, job.tier, assigned)
+    : [channels.routeOrder(pool, job.tier, assigned), channels.routeOrder(pool, "standard", assigned)].find((list) => list.length) || [];
+  const preferred = ordered.filter(takes);
+  const candidates = preferred.length ? preferred : ordered;
   if (!candidates.length) {
     fail(job, { code: "NO_CHANNEL", publicMessage: PUBLIC_MESSAGES.unavailable, detail: "No enabled channel with an API key" });
     return;
@@ -379,6 +386,7 @@ async function runJob(job, onPrepared = () => {}) {
     const size = job.upscale_of ? job.size
       : channel.kind === "gemini" ? flexibleSize(job.ratio, tier) : sizeForChannel(job.ratio, tier, channel.options.sizeMode);
     channelActive.set(channel.id, (channelActive.get(channel.id) || 0) + 1);
+    const sentAt = Date.now();
     let result;
     try {
       result = await providerFor(channel).run(channel, {
@@ -393,13 +401,13 @@ async function runJob(job, onPrepared = () => {}) {
       errors.push({ channel: channel.id, kind: perr.kind, code: perr.code, status: perr.status, message: perr.message,
         publicMessage: perr.publicMessage, detail: perr.detail || undefined });
       if (perr.kind === "user") {
-        channels.markSuccess(channel.id); // the channel worked; the request was refused
+        channels.markSuccess(channel); // the channel worked; the request was refused
         fail(job, { code: perr.code || "REJECTED", publicMessage: perr.publicMessage || PUBLIC_MESSAGES.rejected,
           detail: JSON.stringify(errors) });
         log.info(`Generation ${job.id} rejected by model: ${perr.code} ${perr.message}`);
         return;
       }
-      channels.markFailure(channel.id, `${perr.code || ""} ${perr.message}`.trim());
+      channels.markFailure(channel, `${perr.code || ""} ${perr.message}`.trim());
       log.warn(`Generation ${job.id} failed on channel #${channel.id} (${perr.kind}): ${perr.message}`);
       continue;
     } finally {
@@ -407,7 +415,7 @@ async function runJob(job, onPrepared = () => {}) {
     }
     // The channel delivered (and was paid). A failure from here on is ours:
     // don't blame the channel or ask another one, refund and stop.
-    channels.markSuccess(channel.id);
+    channels.markSuccess(channel);
     // What really came back: some relays take the size and answer a 1024-class
     // image. A 2K or 4K job that got under 80% of its pixels holds the channel to
     // what it delivered; a 超分 that came back no larger isn't one.
@@ -416,8 +424,8 @@ async function runJob(job, onPrepared = () => {}) {
     const wanted = dims(size);
     const short = tier !== "standard" && !!got && !!wanted && got[0] * got[1] < wanted[0] * wanted[1] * 0.8;
     if (short) {
-      channels.limitSizes(channel.id, { maxTier: deliveredTier(got[0] * got[1], job.ratio, tier),
-        requested: size, delivered, since: job.started_at });
+      channels.limitSizes(channel.modelId, { maxTier: deliveredTier(got[0] * got[1], job.ratio, tier),
+        requested: size, delivered, since: sentAt });
       log.warn(`Generation ${job.id}: channel #${channel.id} answered ${size} with ${delivered}`);
       if (job.upscale_of) {
         fail(job, { code: "UPSCALE_TOO_SMALL", publicMessage: "生成渠道没有返回更高分辨率的图片，本次点数已退回。",

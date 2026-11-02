@@ -51,7 +51,9 @@ const itemIdsOf = (row) => {
 function assetRef(id) {
   if (!id) return null;
   const asset = library.getAsset(id);
-  return asset ? { id: asset.id, thumb: library.displayDto(asset).thumb, name: asset.name_zh || asset.name } : { id };
+  if (!asset) return { id };
+  const shown = library.displayDto(asset);
+  return { id: asset.id, thumb: shown.thumb, preview: shown.preview, name: asset.name_zh || asset.name };
 }
 
 function outfitUploadRef(id, owner) {
@@ -74,11 +76,12 @@ function personRef(row, owner) {
     const upload = db.prepare("SELECT deleted_at, expires_at, virtual FROM uploads WHERE id = ?").get(row.person_upload_id);
     const alive = upload && !upload.deleted_at && (!upload.expires_at || upload.expires_at > Date.now());
     return { ...out, source: "upload", id: row.person_upload_id, virtual: upload?.virtual || "none",
-      thumb: alive ? `/media/uploads/${row.person_upload_id}/thumb` : null };
+      thumb: alive ? `/media/uploads/${row.person_upload_id}/thumb` : null, url: alive ? `/media/uploads/${row.person_upload_id}` : null };
   }
   const image = db.prepare(`SELECT i.id FROM generation_images i JOIN generations g ON g.id = i.generation_id
     WHERE i.id = ? AND g.deleted_at IS NULL`).get(row.person_image_id);
-  return { ...out, source: "image", id: row.person_image_id, thumb: image ? `/media/gen/${image.id}/thumb` : null };
+  return { ...out, source: "image", id: row.person_image_id, thumb: image ? `/media/gen/${image.id}/thumb` : null,
+    url: image ? `/media/gen/${image.id}/view` : null };
 }
 
 // `license` covers the library assets used: commercial only if every one is.
@@ -113,7 +116,8 @@ export function dto(row, images = [], { owner = true } = {}) {
     upscaleOf: row.upscale_of || null,
     refs: refSummary(row, { owner }),
     images,
-    createdAt: row.created_at, startedAt: row.started_at, finishedAt: row.finished_at, publishedAt: row.published_at
+    createdAt: row.created_at, startedAt: row.started_at, finishedAt: row.finished_at, publishedAt: row.published_at,
+    attempts: row.attempts
   };
 }
 
@@ -414,33 +418,47 @@ export function setFlags(user, id, { hidden, favorite }) {
   return getOwned(user, id);
 }
 
-export function setPublic(user, id, isPublic) {
+// A work made from a real person's photo goes public only when the setting
+// allows it and the owner confirms, each time, that the person agreed to it
+// being shown (portrait rights). The person's photo itself never goes public.
+export function setPublic(user, id, isPublic, { portraitConsent = false } = {}) {
   const row = ownedRow(user, id);
   const safety = settings.get("safety");
+  const real = row.person_kind === "real";
   if (isPublic) {
     if (!safety.showcaseEnabled) throw forbidden("灵感广场暂未开放", "SHOWCASE_DISABLED");
     if (row.status !== "succeeded") throw badRequest("NOT_READY", "只有生成成功的作品可以发布");
-    // Hard rule: images made from a real person's photo are never published.
-    if (row.person_kind === "real") throw badRequest("PERSON_NOT_PUBLISHABLE", "使用了真人照片的作品不能公开发布");
+    if (real && !safety.realPersonPublic) throw badRequest("PERSON_NOT_PUBLISHABLE", "使用了真人照片的作品暂不能公开发布");
+    if (real && !portraitConsent) {
+      throw badRequest("PORTRAIT_CONSENT_REQUIRED", "公开使用了真人照片的作品前，请确认照片中的人同意公开展示");
+    }
     if (row.hidden) throw forbidden("该作品已被管理员隐藏，不能公开", "HIDDEN_BY_ADMIN");
   }
-  db.prepare("UPDATE generations SET is_public = ?, published_at = ? WHERE id = ?")
-    .run(isPublic ? 1 : 0, isPublic ? Date.now() : null, row.id);
+  db.prepare(`UPDATE generations SET is_public = ?, published_at = ?,
+    publish_consent_at = CASE WHEN ? THEN ? ELSE publish_consent_at END WHERE id = ?`)
+    .run(isPublic ? 1 : 0, isPublic ? Date.now() : null, isPublic && real ? 1 : 0, Date.now(), row.id);
   return getOwned(user, id);
+}
+
+// Whether real-person works may show: never when publishing them is off, and
+// with 真人作品审核 on (the default) only once an admin approved them.
+export function realPersonShown(safety = settings.get("safety")) {
+  if (!safety.realPersonPublic) return "g.person_kind != 'real'";
+  return safety.realPersonReview ? "(g.person_kind != 'real' OR g.approved = 1)" : "1 = 1";
 }
 
 // Public works for the showcase. With review on, only admin-approved works
 // appear; otherwise any published, non-hidden work. Featured works sort first.
-const PUBLIC_WORKS = `FROM generations g JOIN users u ON u.id = g.user_id WHERE g.is_public = 1 AND g.hidden = 0
-  AND g.deleted_at IS NULL AND g.status = 'succeeded' AND g.person_kind != 'real' AND u.status = 'active'`;
+const publicWorks = () => `FROM generations g JOIN users u ON u.id = g.user_id WHERE g.is_public = 1 AND g.hidden = 0
+  AND g.deleted_at IS NULL AND g.status = 'succeeded' AND ${realPersonShown()} AND u.status = 'active'`;
 
 // withTotal: false skips counting every public work (the home page shows no total).
 export function showcase({ offset, size, featuredOnly = false, withTotal = true }) {
   const safety = settings.get("safety");
   if (!safety.showcaseEnabled) return { total: 0, items: [] };
   const filter = [safety.showcaseReview ? "AND g.approved = 1" : "", featuredOnly ? "AND g.featured = 1" : ""].join(" ");
-  const total = withTotal ? db.prepare(`SELECT COUNT(*) AS n ${PUBLIC_WORKS} ${filter}`).get().n : null;
-  const rows = db.prepare(`SELECT g.*, u.nickname AS author ${PUBLIC_WORKS} ${filter}
+  const total = withTotal ? db.prepare(`SELECT COUNT(*) AS n ${publicWorks()} ${filter}`).get().n : null;
+  const rows = db.prepare(`SELECT g.*, u.nickname AS author ${publicWorks()} ${filter}
     ORDER BY g.featured DESC, g.published_at DESC LIMIT ? OFFSET ?`).all(size, offset);
   const map = imagesFor(rows.map((r) => r.id));
   return {
@@ -458,7 +476,7 @@ export function showcase({ offset, size, featuredOnly = false, withTotal = true 
 export function homeCombos(viewer, limit = 6) {
   const safety = settings.get("safety");
   if (!safety.showcaseEnabled) return [];
-  const rows = db.prepare(`SELECT g.* ${PUBLIC_WORKS} ${safety.showcaseReview ? "AND g.approved = 1" : ""}
+  const rows = db.prepare(`SELECT g.* ${publicWorks()} ${safety.showcaseReview ? "AND g.approved = 1" : ""}
       AND g.pose_id IS NOT NULL AND g.outfit_id IS NOT NULL AND g.person_kind = 'none'
       AND g.scene_asset_id IS NULL AND g.item_ids IS NULL
     ORDER BY g.featured DESC, g.published_at DESC LIMIT 40`).all();
@@ -492,17 +510,22 @@ export function adminList({ status, kind, userId, q, isPublic, offset, size }) {
     JOIN users u ON u.id = g.user_id LEFT JOIN channels c ON c.id = g.channel_id
     WHERE ${sql} ORDER BY g.created_at DESC LIMIT ? OFFSET ?`).all(...params, size, offset);
   const map = imagesFor(rows.map((r) => r.id));
+  const gen = settings.get("generation");
+  const labelOf = (list, id) => (id ? list.find((x) => x.id === id)?.label || id : "");
   return {
     total,
     items: rows.map((r) => ({
       ...dto(r, map.get(r.id) || []),
+      // The names the studio showed, for the admin's detail view.
+      labels: { quality: labelOf(gen.qualities, r.quality), tier: labelOf(gen.tiers, r.tier), style: labelOf(gen.styles, r.style),
+        scene: labelOf(gen.scenes, r.scene), camera: labelOf(gen.cameras || [], r.camera) },
       userId: r.user_id, userEmail: r.user_email, channelName: r.channel_name, model: r.model,
       attempts: r.attempts, errorDetail: r.error_detail, apiCostUsd: r.api_cost_usd,
       usage: r.usage ? JSON.parse(r.usage) : null, promptFinal: r.prompt_final,
       deleted: !!r.deleted_at, clientIp: r.client_ip, hasPerson: r.person_kind !== "none",
       personUploadId: r.person_upload_id, outfitUploadId: r.outfit_upload_id,
       kind: r.kind, refUploadId: r.ref_upload_id, sourceAssetId: r.source_asset_id, assetJob: r.kind === "asset" ? JSON.parse(r.params || "{}") : null,
-      shootId: r.shoot_id
+      shootId: r.shoot_id, publishConsentAt: r.publish_consent_at
     }))
   };
 }
@@ -513,7 +536,9 @@ export function adminUpdate(id, { hidden, featured, approved }) {
   if (hidden !== undefined) db.prepare("UPDATE generations SET hidden = ? WHERE id = ?").run(hidden ? 1 : 0, row.id);
   if (approved !== undefined) db.prepare("UPDATE generations SET approved = ? WHERE id = ?").run(approved ? 1 : 0, row.id);
   if (featured !== undefined) {
-    if (featured && row.person_kind === "real") throw badRequest("PERSON_NOT_PUBLISHABLE", "使用了真人照片的作品不能推荐");
+    if (featured && row.person_kind === "real" && !settings.get("safety").realPersonPublic) {
+      throw badRequest("PERSON_NOT_PUBLISHABLE", "「内容安全」里没有开放公开真人照片作品，不能推荐");
+    }
     db.prepare("UPDATE generations SET featured = ? WHERE id = ?").run(featured ? 1 : 0, row.id);
   }
   return db.prepare("SELECT * FROM generations WHERE id = ?").get(row.id);

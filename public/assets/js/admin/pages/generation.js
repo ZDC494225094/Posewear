@@ -115,7 +115,7 @@ export async function render() {
     { heading: "功能开关" },
     { key: "allowTextOnly", label: "允许纯文字生成（不选参考图）", type: "switch" },
     { key: "allowOutfitUpload", label: "允许上传自己的服装图", type: "switch" },
-    { key: "allowPersonPhoto", label: "允许上传人物照片", type: "switch", help: "真人照片不能搭配敏感级服装、场景和物品，也不能用双人姿势，作品不能公开。" },
+    { key: "allowPersonPhoto", label: "允许上传人物照片", type: "switch", help: "真人照片不能搭配敏感级服装、场景和物品，也不能用双人姿势；作品能否公开见「内容安全」。" },
     { heading: "作品超分（2K / 4K）" },
     { key: "upscale.enabled", label: "开放作品超分", type: "switch", help: "用户在作品大图里把一张图按原构图重绘到 2K 或 4K，结果是一个新作品，原图保留。只用能出 2K / 4K 的渠道（gpt-image-2 / 2.5、Nano Banana Pro / 2 / 2.1）。" },
     { key: "upscale.hdCredits", label: "超分到 2K 点数/张", type: "number", min: 0 },

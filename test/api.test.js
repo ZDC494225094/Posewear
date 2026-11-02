@@ -188,9 +188,42 @@ test("person photos need consent, go with suggestive poses but not suggestive ou
   assert.equal(fake.requests.at(-1).files.filter((x) => x.field === "image[]").length, 3);
   assert.match(fake.requests.at(-1).fields.prompt, /Image 3 is the PERSON reference/);
 
-  const publish = await user.post(`/api/generations/${gen.id}/publish`, { public: true });
-  assert.equal(publish.status, 400);
-  assert.equal(publish.data.error.code, "PERSON_NOT_PUBLISHABLE");
+  // Public only once the owner confirms the person agreed, and shown after an admin approves it.
+  const noPortrait = await user.post(`/api/generations/${gen.id}/publish`, { public: true });
+  assert.equal(noPortrait.status, 400);
+  assert.equal(noPortrait.data.error.code, "PORTRAIT_CONSENT_REQUIRED");
+  const published = await user.post(`/api/generations/${gen.id}/publish`, { public: true, portraitConsent: true });
+  assert.equal(published.status, 200, JSON.stringify(published.data));
+  assert.equal(published.data.generation.isPublic, true);
+  const guest = client(app.base);
+  const listed = async () => (await guest.get("/api/public/showcase")).data.items.find((w) => w.id === gen.id);
+  assert.equal(await listed(), undefined, "waits for an admin");
+  assert.equal((await guest.raw(gen.images[0].thumb)).status, 404);
+  assert.ok((await admin.get(`/api/admin/generations?q=${gen.id}`)).data.items[0].publishConsentAt > 0);
+  assert.ok((await admin.get("/api/admin/badges")).data.pendingReview >= 1, "counted for review although 广场审核 is off");
+  assert.equal((await admin.patch(`/api/admin/generations/${gen.id}`, { approved: true })).status, 200);
+  const shown = await listed();
+  assert.ok(shown, "approved, it shows");
+  assert.equal((await guest.raw(gen.images[0].thumb)).status, 200);
+  // The person's photo itself stays private.
+  assert.deepEqual(shown.refs.person, { kind: "real" });
+  assert.ok([401, 404].includes((await guest.raw(`/media/uploads/${personUploadId}/thumb`)).status));
+  assert.equal((await admin.patch(`/api/admin/generations/${gen.id}`, { featured: true })).status, 200);
+  assert.ok((await guest.get("/api/public/home")).data.featured.some((w) => w.id === gen.id), "recommended on the home page");
+
+  // With publishing them switched off, such works disappear and can't be published again.
+  await admin.put("/api/admin/settings/safety", { value: { realPersonPublic: false } });
+  try {
+    assert.equal(await listed(), undefined);
+    assert.equal((await guest.raw(gen.images[0].thumb)).status, 404);
+    const again = await user.post(`/api/generations/${gen.id}/publish`, { public: true, portraitConsent: true });
+    assert.equal(again.data.error.code, "PERSON_NOT_PUBLISHABLE");
+    assert.equal((await admin.patch(`/api/admin/generations/${gen.id}`, { featured: true })).data.error.code, "PERSON_NOT_PUBLISHABLE");
+  } finally {
+    await admin.put("/api/admin/settings/safety", { value: { realPersonPublic: true } });
+    await admin.patch(`/api/admin/generations/${gen.id}`, { featured: false });
+    await user.post(`/api/generations/${gen.id}/publish`, { public: false });
+  }
 });
 
 test("publishing a work makes it visible in the showcase", async () => {
