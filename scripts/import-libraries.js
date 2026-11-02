@@ -49,7 +49,10 @@ if (!has("accept-license")) {
 }
 
 migrate();
-const zh = JSON.parse(fs.readFileSync(path.join(config.root, "scripts", "data", "library-zh.json"), "utf8"));
+// Lookup tables without inherited keys, so odd values in the data ("constructor") find nothing.
+const table = (entries) => Object.assign(Object.create(null), entries);
+const zh = Object.fromEntries(Object.entries(JSON.parse(fs.readFileSync(path.join(config.root, "scripts", "data", "library-zh.json"), "utf8")))
+  .map(([key, value]) => [key, table(value)]));
 const now = Date.now();
 const library = config.libraryDir;
 
@@ -87,6 +90,9 @@ async function pool(items, limit, fn) {
   }));
 }
 
+// IDs become file names and asset IDs; anything else in the data is skipped.
+const SAFE_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
 function readArray(file) {
   const text = fs.readFileSync(file, "utf8");
   const start = text.indexOf("["), end = text.lastIndexOf("]");
@@ -96,13 +102,18 @@ function readArray(file) {
 
 // ---------- 人像库: AI portraits (face type), used as the person of a work
 
-const HAIR = { "ショート": ["short", "短发", "Short hair"], "ミディアム": ["medium", "中发", "Medium hair"],
-  "セミロング": ["semi-long", "中长发", "Semi-long hair"], "ロング": ["long", "长发", "Long hair"] };
-const SECTION = { face: ["正脸参考", "Face reference", "正脸"], styling: ["造型参考", "Styling reference", "造型"] };
+const HAIR = table({ "ショート": ["short", "短发", "Short hair"], "ミディアム": ["medium", "中发", "Medium hair"],
+  "セミロング": ["semi-long", "中长发", "Semi-long hair"], "ロング": ["long", "长发", "Long hair"] });
+const SECTION = table({ face: ["正脸参考", "Face reference", "正脸"], styling: ["造型参考", "Styling reference", "造型"] });
+
+// The site keeps its images in img/full and img/thumb; plain full/ and thumb/ work too.
+const portraitFile = (dir, kind, id, ext) =>
+  [path.join(dir, "img", kind, `${id}.${ext}`), path.join(dir, kind, `${id}.${ext}`)].find((f) => fs.existsSync(f));
 
 async function importPortraits(dir) {
-  const items = readArray(path.join(dir, "images.js"));
-  const ready = items.filter((it) => fs.existsSync(path.join(dir, "full", `${it.id}.png`)) && fs.existsSync(path.join(dir, "thumb", `${it.id}.webp`)));
+  const items = readArray(path.join(dir, "images.js")).filter((it) => SAFE_ID.test(String(it?.id)));
+  const ready = items.map((it, index) => ({ ...it, index, png: portraitFile(dir, "full", it.id, "png"), webp: portraitFile(dir, "thumb", it.id, "webp") }))
+    .filter((it) => it.png && it.webp);
   console.log(`Portraits: ${ready.length} of ${items.length} downloaded`);
   let done = 0;
   await pool(ready, 4, async (it) => {
@@ -111,13 +122,12 @@ async function importPortraits(dir) {
     if (!fs.existsSync(original) || !fs.existsSync(preview)) {
       fs.mkdirSync(path.dirname(original), { recursive: true });
       fs.mkdirSync(path.dirname(preview), { recursive: true });
-      const png = path.join(dir, "full", `${it.id}.png`);
-      await sharp(png).jpeg({ quality: 92, chromaSubsampling: "4:4:4" }).toFile(`${original}.part`);
+      await sharp(it.png).jpeg({ quality: 92, chromaSubsampling: "4:4:4" }).toFile(`${original}.part`);
       fs.renameSync(`${original}.part`, original);
-      await sharp(png).resize({ width: 1024, height: 1024, fit: "inside" }).webp({ quality: 85 }).toFile(`${preview}.part`);
+      await sharp(it.png).resize({ width: 1024, height: 1024, fit: "inside" }).webp({ quality: 85 }).toFile(`${preview}.part`);
       fs.renameSync(`${preview}.part`, preview);
     }
-    copy(path.join(dir, "thumb", `${it.id}.webp`), path.join("portrait", "thumb", `${it.id}.webp`));
+    copy(it.webp, path.join("portrait", "thumb", `${it.id}.webp`));
     if (++done % 200 === 0) console.log(`  ${done} converted`);
   });
   db.transaction(() => {
@@ -131,7 +141,7 @@ async function importPortraits(dir) {
         name: it.style || "", name_zh: style || `${lengthZh} · ${short}`, name_en: `${lengthEn}, ${it.section}`,
         keywords: [lengthZh, sectionZh, style, it.style].filter(Boolean).join(" "),
         thumb_path: `portrait/thumb/${it.id}.webp`, preview_path: `portrait/preview/${it.id}.webp`,
-        original_path: `portrait/original/${it.id}.jpg`, sort: items.indexOf(it), source: "portrait"
+        original_path: `portrait/original/${it.id}.jpg`, sort: it.index, source: "portrait"
       }));
     });
   })();
@@ -160,13 +170,13 @@ function importDepth(dir) {
 
 // ---------- 二次元库: CharaDB outfits, poses and hair
 
-const OUTFIT_CATS = { "制服・学生": "chara-school", "カジュアル(春夏)": "chara-casual-ss", "カジュアル(秋冬)": "chara-casual-aw",
+const OUTFIT_CATS = table({ "制服・学生": "chara-school", "カジュアル(春夏)": "chara-casual-ss", "カジュアル(秋冬)": "chara-casual-aw",
   "きれいめ・オフィス": "chara-office", "ドレス・パーティ": "chara-dress", "和服": "chara-wafuku", "水着": "chara-swim",
   "スポーツ・部活": "chara-sports", "職業・コスプレ": "chara-cosplay", "ファンタジー": "chara-fantasy", "部屋着・パジャマ": "chara-roomwear",
-  "イベント・季節": "chara-events", "アイドル・ステージ": "chara-idol", "ゴスロリ・地雷系": "chara-gothic", "ミリタリー・SF": "chara-military" };
-const POSE_CATS = { "立ち": "chara-stand", "座り": "chara-sit", "寝そべり": "chara-lie", "しゃがみ・膝立ち": "chara-crouch",
-  "上半身・手の仕草": "chara-upper", "動き": "chara-motion", "2人": "chara-duo", "日常の動作": "chara-daily" };
-const HAIR_CATS = { "髪型": "style", "前髪": "bangs", "髪色": "color", "髪飾り": "acc", "目の色": "eye-color", "瞳の形": "eye-shape" };
+  "イベント・季節": "chara-events", "アイドル・ステージ": "chara-idol", "ゴスロリ・地雷系": "chara-gothic", "ミリタリー・SF": "chara-military" });
+const POSE_CATS = table({ "立ち": "chara-stand", "座り": "chara-sit", "寝そべり": "chara-lie", "しゃがみ・膝立ち": "chara-crouch",
+  "上半身・手の仕草": "chara-upper", "動き": "chara-motion", "2人": "chara-duo", "日常の動作": "chara-daily" });
+const HAIR_CATS = table({ "髪型": "style", "前髪": "bangs", "髪色": "color", "髪飾り": "acc", "目の色": "eye-color", "瞳の形": "eye-shape" });
 // Never shown or sent to the model: items that read as children (an elementary
 // school uniform, school swimsuits, gym bloomers) and the most revealing
 // swimwear. The terms of the library also forbid depicting minors.
@@ -195,6 +205,7 @@ function importCharaDB(dir) {
   const file = (folder, id, ext) => path.join(dir, folder, `${id}.${ext}`);
   db.transaction(() => {
     data.items.forEach((item, i) => {
+      if (!SAFE_ID.test(String(item?.id))) return;
       const id = `cd-${item.id}`;
       if (!fs.existsSync(file("img", item.id, "jpg")) || !fs.existsSync(file("thumb", item.id, "webp"))) { stats.missing += 1; return; }
       copy(file("img", item.id, "jpg"), `chara/img/${item.id}.jpg`);

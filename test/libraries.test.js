@@ -32,9 +32,10 @@ async function makeLibraries(dir) {
     { id: "f0000000002", section: "styling", hair: "ショート", style: "" },
     { id: "f0000000003", section: "face", hair: "ボブ", style: "" }
   ];
-  for (const p of portraits.slice(0, 2)) {
-    await img(path.join(dir, "portrait", "full", `${p.id}.png`), 600, 750, "#c8a090");
-    await img(path.join(dir, "portrait", "thumb", `${p.id}.webp`), 400, 500, "#c8a090");
+  // The site's own layout (img/full, img/thumb) and a flat one both work.
+  for (const [p, base] of [[portraits[0], ["portrait", "img"]], [portraits[1], ["portrait"]]]) {
+    await img(path.join(dir, ...base, "full", `${p.id}.png`), 600, 750, "#c8a090");
+    await img(path.join(dir, ...base, "thumb", `${p.id}.webp`), 400, 500, "#c8a090");
   }
   // The third one isn't downloaded yet: skipped.
   fs.writeFileSync(path.join(dir, "portrait", "images.js"), `window.GALLERY_IMAGES = ${JSON.stringify(portraits)};\n`);

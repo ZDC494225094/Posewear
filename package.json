@@ -1,6 +1,6 @@
 {
   "name": "posewear-studio",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "private": true,
   "description": "姿衣 PoseWear：姿势 × 服装 × 人物参考，接入 gpt-image-2 的 AI 成片平台（基于 ai-reference-gallery 改造）",
   "type": "module",
@@ -11,6 +11,7 @@
     "start": "node server/index.js",
     "dev": "node --watch-path=server server/index.js",
     "import:upstream": "node scripts/import-upstream.js",
+    "import:libraries": "node scripts/import-libraries.js",
     "admin:create": "node scripts/create-admin.js",
     "fake-openai": "node scripts/fake-openai.js",
     "test": "node --test test",
