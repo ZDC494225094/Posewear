@@ -71,6 +71,11 @@ function outfitUploadRef(id, owner) {
 function personRef(row, owner) {
   if (row.person_kind === "none") return null;
   const out = { kind: row.person_kind };
+  // A portrait from the library is public content, shown to everyone.
+  if (row.person_asset_id) {
+    const ref = assetRef(row.person_asset_id);
+    return { ...out, source: "library", ...ref, url: ref.preview || ref.thumb || null };
+  }
   if (!owner) return out;
   if (row.person_upload_id) {
     const upload = db.prepare("SELECT deleted_at, expires_at, virtual FROM uploads WHERE id = ?").get(row.person_upload_id);
@@ -92,12 +97,16 @@ function refSummary(row, { owner = false } = {}) {
   const scene = row.scene_asset_id ? library.getAsset(row.scene_asset_id) : null;
   const itemIds = itemIdsOf(row);
   const items = itemIds.map((id) => library.getAsset(id)).filter(Boolean);
-  const used = [pose, outfit, scene, ...items].filter(Boolean);
+  const extra = [row.person_asset_id, row.hair_asset_id].filter(Boolean).map((id) => library.getAsset(id));
+  const used = [pose, outfit, scene, ...items, ...extra].filter(Boolean);
   return {
     pose: assetRef(row.pose_id),
+    // The pose's depth map went to the model too.
+    poseDepth: !!row.pose_depth,
     outfit: row.outfit_id ? assetRef(row.outfit_id) : row.outfit_upload_id ? outfitUploadRef(row.outfit_upload_id, owner) : null,
     scene: assetRef(row.scene_asset_id),
     items: itemIds.map(assetRef),
+    hair: assetRef(row.hair_asset_id),
     person: personRef(row, owner),
     license: !used.length ? null : used.every((a) => a.license === "commercial") ? "commercial" : "noncommercial"
   };
@@ -143,8 +152,15 @@ function ownedWorkImage(user, imageId) {
 // The person reference and its kind. A photo counts as a real person unless an
 // admin approved it as virtual; an image from the user's own work counts as
 // virtual unless that work used a real person's photo.
-function resolvePerson(user, input, gen) {
-  if (input.personUploadId && input.personImageId) throw badRequest("INVALID_INPUT", "人物只能选择一个来源");
+function resolvePerson(user, input, gen, viewer) {
+  if ([input.personUploadId, input.personImageId, input.personAssetId].filter(Boolean).length > 1) {
+    throw badRequest("INVALID_INPUT", "人物只能选择一个来源");
+  }
+  // A portrait from the 人像库: AI-made people who don't exist, so a virtual person.
+  if (input.personAssetId) {
+    const asset = libraryRef(input.personAssetId, "face", { viewer, withPerson: false, gone: "PERSON_UNAVAILABLE", label: "人像" });
+    return { kind: "virtual", assetId: asset.id, asset, consentAt: null };
+  }
   if (input.personUploadId) {
     if (!gen.allowPersonPhoto) throw forbidden("当前未开放人物照片功能", "PERSON_DISABLED");
     const upload = uploads.getOwnedUpload(user, input.personUploadId, "person");
@@ -200,11 +216,11 @@ export function validateRequest(user, input) {
   const banned = findBannedWord(userText);
   if (banned) throw badRequest("PROMPT_BLOCKED", `描述中包含不允许的内容（“${banned}”），请修改后再试`);
 
-  const person = resolvePerson(user, input, gen);
+  const viewer = library.viewerFor(user);
+  const person = resolvePerson(user, input, gen, viewer);
   // The extra rules apply to real people only; a virtual person goes with any
   // pose, outfit, scene or item the user may use for AI generation.
   const withPerson = person?.kind === "real";
-  const viewer = library.viewerFor(user);
 
   let pose = null;
   if (input.poseId) {
@@ -228,19 +244,22 @@ export function validateRequest(user, input) {
   const itemIds = [...new Set((Array.isArray(input.itemIds) ? input.itemIds : []).map(String).filter(Boolean))];
   if (itemIds.length > settings.MAX_ITEMS) throw badRequest("TOO_MANY_ITEMS", `最多选择 ${settings.MAX_ITEMS} 件物品`);
   const items = itemIds.map((id) => libraryRef(id, "item", { viewer, withPerson, gone: "ITEM_UNAVAILABLE", label: "物品" }));
+  const hair = input.hairId ? libraryRef(input.hairId, "hair", { viewer, withPerson, gone: "HAIR_UNAVAILABLE", label: "发型" }) : null;
+  // The depth map of the same pose, when it has one and the user asked for it.
+  const poseDepth = !!input.poseDepth && !!pose?.depth_path;
 
-  if (!pose && !outfit && !outfitUpload && !person && !sceneAsset && !items.length) {
+  if (!pose && !outfit && !outfitUpload && !person && !sceneAsset && !items.length && !hair) {
     if (!gen.allowTextOnly) throw badRequest("REFERENCE_REQUIRED", "请至少选择一张参考图");
     if (!userText) throw badRequest("PROMPT_REQUIRED", "没有参考图时，请写下想要的画面描述");
   }
 
   // Shared assets from other users cost their price once per job.
-  const assetFees = [pose, outfit, sceneAsset, ...items].filter(Boolean)
+  const assetFees = [pose, outfit, sceneAsset, ...items, hair, person?.asset].filter(Boolean)
     .map((asset) => ({ asset, price: library.feeFor(asset, user.id) })).filter((f) => f.price > 0);
   const assetFee = assetFees.reduce((sum, f) => sum + f.price, 0);
 
-  return { gen, quality, tier, ratio, n, style, scene, camera, realism, userText, pose, outfit, outfitUpload, person,
-    sceneAsset, items, assetFees, assetFee };
+  return { gen, quality, tier, ratio, n, style, scene, camera, realism, userText, pose, poseDepth, outfit, outfitUpload, person,
+    sceneAsset, items, hair, assetFees, assetFee };
 }
 
 export function estimate(user, input) {
@@ -285,13 +304,13 @@ export function create(user, input, { ip }) {
   const cost = creditCost(r) + r.assetFee;
   const personKind = r.person?.kind || "none";
   const prompt = buildPrompt({
-    pose: r.pose, outfit: r.outfit || r.outfitUpload, outfitKeywords: r.outfit?.keywords || "",
-    personKind, style: r.style, scene: r.scene, sceneAsset: r.sceneAsset, items: r.items,
+    pose: r.pose, poseDepth: r.poseDepth, outfit: r.outfit || r.outfitUpload, outfitKeywords: r.outfit?.keywords || "",
+    personKind, style: r.style, scene: r.scene, sceneAsset: r.sceneAsset, items: r.items, hair: r.hair,
     camera: r.camera, realism: r.realism, userText: r.userText
   });
   const id = randomId(12);
   const now = Date.now();
-  const hasImages = !!(r.pose || r.outfit || r.outfitUpload || r.person || r.sceneAsset || r.items.length);
+  const hasImages = !!(r.pose || r.outfit || r.outfitUpload || r.person || r.sceneAsset || r.items.length || r.hair);
 
   tx(() => {
     const label = r.gen.qualities.find((q) => q.id === r.quality)?.label || r.quality;
@@ -299,16 +318,18 @@ export function create(user, input, { ip }) {
       note: `${r.n} 张 · ${label}${r.assetFee ? ` · 含素材使用费 ${r.assetFee} 点` : ""}` });
     db.prepare(`INSERT INTO generations (id, user_id, status, mode, pose_id, outfit_id, outfit_upload_id, person_upload_id,
       person_image_id, person_kind, scene_asset_id, item_ids, style, scene, camera, realism, prompt_user, prompt_final,
-      ratio, tier, size, quality, n, cost_credits, asset_fee, consent_at, client_ip, created_at)
-      VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      ratio, tier, size, quality, n, cost_credits, asset_fee, consent_at, client_ip, created_at,
+      person_asset_id, hair_asset_id, pose_depth)
+      VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       id, user.id, hasImages ? "edit" : "generate", r.pose?.id || null, r.outfit?.id || null,
       r.outfitUpload?.id || null, r.person?.uploadId || null, r.person?.imageId || null, personKind,
       r.sceneAsset?.id || null, r.items.length ? JSON.stringify(r.items.map((a) => a.id)) : null,
       r.style?.id || "", r.scene?.id || "", r.camera?.id || "", r.realism ? 1 : 0, r.userText, prompt, r.ratio, r.tier,
       flexibleSize(r.ratio, r.tier), r.quality,
-      r.n, cost, r.assetFee, r.person?.consentAt ?? null, ip, now);
+      r.n, cost, r.assetFee, r.person?.consentAt ?? null, ip, now,
+      r.person?.assetId || null, r.hair?.id || null, r.poseDepth ? 1 : 0);
     if (r.assetFees.length) fees.hold(id, user.id, r.assetFees);
-    library.bumpUse([r.pose?.id, r.outfit?.id, r.sceneAsset?.id, ...r.items.map((a) => a.id)]);
+    library.bumpUse([r.pose?.id, r.outfit?.id, r.sceneAsset?.id, ...r.items.map((a) => a.id), r.hair?.id, r.person?.assetId]);
   })();
 
   return getOwned(user, id);
@@ -347,12 +368,14 @@ export function upscale(user, generationId, input, { ip }) {
       note: `超分 ${UPSCALE_TEXT[target]} · ${size.replace("x", "×")}` });
     db.prepare(`INSERT INTO generations (id, user_id, status, mode, pose_id, outfit_id, outfit_upload_id, person_upload_id,
       person_image_id, person_kind, scene_asset_id, item_ids, style, scene, camera, realism, prompt_user, prompt_final,
-      ratio, tier, size, quality, n, cost_credits, asset_fee, consent_at, hidden, upscale_of, client_ip, created_at)
-      VALUES (?, ?, 'queued', 'edit', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 0, ?, ?, ?, ?, ?)`).run(
+      ratio, tier, size, quality, n, cost_credits, asset_fee, consent_at, hidden, upscale_of, client_ip, created_at,
+      person_asset_id, hair_asset_id, pose_depth)
+      VALUES (?, ?, 'queued', 'edit', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       id, user.id, source.pose_id, source.outfit_id, source.outfit_upload_id, source.person_upload_id,
       source.person_image_id, source.person_kind, source.scene_asset_id, source.item_ids, source.style, source.scene,
       source.camera, source.realism, source.prompt_user, settings.get("prompt").upscale,
-      source.ratio, target, size, gen.upscale.quality, cost, source.consent_at, source.hidden, image.id, ip, Date.now());
+      source.ratio, target, size, gen.upscale.quality, cost, source.consent_at, source.hidden, image.id, ip, Date.now(),
+      source.person_asset_id, source.hair_asset_id, source.pose_depth);
   })();
   return getOwned(user, id);
 }

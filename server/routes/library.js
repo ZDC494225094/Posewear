@@ -45,8 +45,8 @@ router.get("/library/poses", (req, res) => {
   }, viewerOf(req), { offset, limit: size }));
 });
 
-// Outfits, scenes and items share one listing.
-for (const [path, type] of [["outfits", "outfit"], ["scenes", "scene"], ["items", "item"]]) {
+// Outfits, scenes, items, portraits and hair share one listing.
+for (const [path, type] of [["outfits", "outfit"], ["scenes", "scene"], ["items", "item"], ["faces", "face"], ["hairs", "hair"]]) {
   router.get(`/library/${path}`, (req, res) => {
     const { offset, size } = v.page(req.query, { defaultSize: 48, maxSize: 96 });
     res.json(library.queryFlat(type, {

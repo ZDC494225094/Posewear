@@ -56,11 +56,13 @@ async function publishWork(gen, isPublic) {
 // Every reference a work used, labelled: [label, thumb url or null, chip text].
 export function refEntries(refs = {}) {
   const out = [];
-  if (refs.pose) out.push(["姿势", refs.pose.thumb, refs.pose.thumb ? "" : "已下架"]);
+  if (refs.pose) out.push(["姿势", refs.pose.thumb, !refs.pose.thumb ? "已下架" : refs.poseDepth ? "含深度图" : ""]);
   if (refs.outfit?.thumb) out.push(["服装", refs.outfit.thumb, refs.outfit.upload ? "自定义服装" : ""]);
   else if (refs.outfit?.upload) out.push(["服装", null, refs.outfit.id ? "自定义服装（已过期或删除）" : "自定义服装（不公开）"]);
   else if (refs.outfit) out.push(["服装", null, "已下架"]);
-  if (refs.person) out.push(["人物", refs.person.thumb || null, PERSON_TEXT[refs.person.kind] || "人物"]);
+  if (refs.person) out.push(["人物", refs.person.thumb || null, refs.person.source === "library" ? (refs.person.thumb ? "AI 人像" : "AI 人像（已下架）")
+    : PERSON_TEXT[refs.person.kind] || "人物"]);
+  if (refs.hair) out.push(["发型", refs.hair.thumb, refs.hair.thumb ? "" : "已下架"]);
   if (refs.scene) out.push(["场景", refs.scene.thumb, refs.scene.thumb ? "" : "已下架"]);
   for (const item of refs.items || []) out.push(["物品", item.thumb, item.thumb ? "" : "已下架"]);
   return out;
@@ -112,14 +114,16 @@ export function reuseInStudio(gen) {
   const made = gen.upscaleOf ? {} : { tier: gen.tier, quality: gen.quality, n: gen.n };
   draft.patch({ ratio: gen.ratio, ...made, style: gen.style, scene: gen.scene,
     camera: gen.camera || "", realism: !!gen.realism,
-    prompt: gen.prompt || "", pose: null, outfit: null, outfitUpload, sceneAsset: null, items: [], person });
+    prompt: gen.prompt || "", pose: null, poseDepth: !!refs.poseDepth, outfit: null, outfitUpload, sceneAsset: null, items: [],
+    hair: null, person });
   const params = new URLSearchParams();
   if (refs.pose?.id) params.set("pose", refs.pose.id);
   if (refs.outfit?.id && !refs.outfit.upload) params.set("outfit", refs.outfit.id);
   if (refs.scene?.id) params.set("sceneId", refs.scene.id);
   if (refs.items?.length) params.set("items", refs.items.map((i) => i.id).join(","));
+  if (refs.hair?.id) params.set("hair", refs.hair.id);
   if (refs.outfit?.upload && !outfitUpload) toast("上传的服装图已过期或删除，需要重新选择", { type: "error" });
-  if (refs.person && !person) toast("人物照片已删除，需要重新选择", { type: "error" });
+  if (refs.person && !person) toast(refs.person.source === "library" ? "所用的 AI 人像已下架，需要重新选择" : "人物照片已删除，需要重新选择", { type: "error" });
   navigate(`/studio${params.size ? `?${params}` : ""}`);
 }
 

@@ -15,9 +15,9 @@ export const LICENSES = ["commercial", "noncommercial"];
 export const ASSET_TYPES = taxonomy.ASSET_TYPES;
 // Every type except poses is a flat list; poses group their camera angles.
 export const FLAT_TYPES = ASSET_TYPES.filter((t) => t !== "pose");
-export const TYPE_LABELS = { pose: "姿势", outfit: "服装", scene: "场景", item: "物品" };
+export const TYPE_LABELS = { pose: "姿势", outfit: "服装", scene: "场景", item: "物品", face: "人像", hair: "发型" };
 // Asset ids start with c (uploaded) or g (generated) plus this letter.
-export const ID_PREFIX = { pose: "p", outfit: "o", scene: "s", item: "i" };
+export const ID_PREFIX = { pose: "p", outfit: "o", scene: "s", item: "i", face: "f", hair: "h" };
 // Camera angles used by the pose catalog, in display order.
 export const ANGLES = [
   { key: "正面", zh: "正面", en: "Front" },
@@ -87,7 +87,8 @@ export function invalidate() {
 export function counts() {
   const { byType, groups } = idx();
   return { poses: byType.pose.length, poseGroups: groups.size, outfits: byType.outfit.length,
-    scenes: byType.scene.length, items: byType.item.length };
+    scenes: byType.scene.length, items: byType.item.length, faces: byType.face.length, hairs: byType.hair.length,
+    depths: byType.pose.filter((r) => r.depth_path).length };
 }
 
 // Rows of one type, or of every type.
@@ -217,6 +218,11 @@ export function checkLink(id, variant, token, key) {
 
 const plainLink = (row, variant) => `/media/library/${encodeURIComponent(row.id)}/${variant}`;
 
+// The imported libraries ask that their images not be passed on: they are
+// shown and used for generation, but not offered as downloads.
+const NO_DOWNLOAD = new Set(["portrait", "charadb"]);
+export const downloadable = (row) => !NO_DOWNLOAD.has(row.source);
+
 function canDownload(viewer) {
   const policy = settings.get("library").originalDownload;
   return policy === "public" || (policy === "login" && viewer.loggedIn);
@@ -232,12 +238,16 @@ function fields(row) {
     category: row._category,
     name: { zh: row.name_zh || row.name, en: row.name_en || row.name },
     angle: row.type === "pose" ? columnLabel(row, "angle") : null,
+    hasDepth: !!row.depth_path,
     keywords: row.keywords,
     people: row.people,
     rating: row.rating,
     license: row.license,
     origin: row.owner_id ? "user" : "platform",
     generated: row.source === "ai",
+    // Imported upstream outfits only have codes; generated and CharaDB ones have names.
+    named: row.type !== "outfit" || ["ai", "charadb"].includes(row.source),
+    downloadable: downloadable(row),
     owner: row.owner_id ? { id: row.owner_id, name: row.owner_name || "用户" } : null,
     price: row.owner_id ? row.price : 0
   };
@@ -253,13 +263,17 @@ export function dto(row, viewer = null) {
     return { ...rest, locked: true, ai: false, aiWithPerson: false, blur: plainLink(row, "blur"), thumb: null, preview: null, original: null };
   }
   const link = (variant) => (viewer ? mediaLink(row, variant, viewer.key) : plainLink(row, variant));
+  const large = !viewer || viewer.loggedIn || viewer.service;
   return {
     ...fields(row),
     ai: usableForAI(row),
     aiWithPerson: usableForAI(row, { withPerson: true }),
     thumb: link("thumb"),
-    preview: !viewer || viewer.loggedIn || viewer.service ? link("preview") : null,
-    original: !viewer || canDownload(viewer) ? link("original") : null
+    preview: large ? link("preview") : null,
+    original: !viewer || (canDownload(viewer) && downloadable(row)) ? link("original") : null,
+    // A pose's depth map (lighter is nearer), shown and sent like a preview.
+    depthThumb: row.depth_path ? link("depth-thumb") : null,
+    depth: row.depth_path && large ? link("depth") : null
   };
 }
 
@@ -268,7 +282,8 @@ export function dto(row, viewer = null) {
 // still needs access).
 export function displayDto(row) {
   return { ...fields(row), ai: usableForAI(row), aiWithPerson: usableForAI(row, { withPerson: true }),
-    thumb: mediaLink(row, "thumb"), preview: mediaLink(row, "preview") };
+    thumb: mediaLink(row, "thumb"), preview: mediaLink(row, "preview"),
+    depthThumb: row.depth_path ? mediaLink(row, "depth-thumb") : null };
 }
 
 // What the owner (and admins) see on top of the public fields.
@@ -460,9 +475,12 @@ export function random({ type, series, category, includeDuo = false, forAI = fal
 
 // ---------- files
 
+// variant: thumb, preview, original, or a pose's depth map ("depth", "depth-thumb").
 export function assetFile(asset, variant) {
   const rel = variant === "thumb" ? asset.thumb_path
     : variant === "preview" ? (asset.preview_path || asset.original_path)
+    : variant === "depth" ? asset.depth_path
+    : variant === "depth-thumb" ? asset.depth_thumb_path
     : asset.original_path;
   if (!rel || rel.includes("..")) return null;
   const root = asset.root === "custom" ? customRoot : config.libraryDir;
@@ -475,7 +493,8 @@ export function assetFile(asset, variant) {
 // already large enough and much smaller than the PNG originals. Poses are line
 // art and go as the original.
 export function aiSourceFile(asset) {
-  return asset.type !== "pose" && asset.preview_path ? assetFile(asset, "preview") : assetFile(asset, "original");
+  // A portrait goes at full size: the face is what the model has to keep.
+  return asset.type !== "pose" && asset.type !== "face" && asset.preview_path ? assetFile(asset, "preview") : assetFile(asset, "original");
 }
 
 export function bumpUse(ids) {

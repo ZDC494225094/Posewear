@@ -146,6 +146,12 @@ async function loadInputs(job) {
     const file = asset && library.aiSourceFile(asset);
     if (!file || !fs.existsSync(file)) throw new InputError("姿势参考图文件缺失");
     images.push({ ...(await prepare(file, { lineArt: true, maxEdge })), name: "pose" });
+    // The same pose as a depth map, right after it (the prompt numbers it so).
+    if (job.pose_depth) {
+      const depth = library.assetFile(asset, "depth");
+      if (!depth || !fs.existsSync(depth)) throw new InputError("姿势的深度图文件缺失");
+      images.push({ ...(await prepare(depth, { lineArt: true, maxEdge })), name: "pose-depth" });
+    }
   }
   if (job.outfit_id) {
     const asset = library.getAsset(job.outfit_id);
@@ -157,7 +163,12 @@ async function loadInputs(job) {
     if (!row || row.deleted_at) throw new InputError("上传的服装图片已被删除");
     images.push({ ...(await prepare(uploads.uploadFile(row), { lineArt: false, maxEdge })), name: "outfit" });
   }
-  if (job.person_upload_id) {
+  if (job.person_asset_id) {
+    const asset = library.getAsset(job.person_asset_id);
+    const file = asset && library.aiSourceFile(asset);
+    if (!file || !fs.existsSync(file)) throw new InputError("人像参考图文件缺失");
+    images.push({ ...(await prepare(file, { lineArt: false, maxEdge })), name: "person" });
+  } else if (job.person_upload_id) {
     const row = db.prepare("SELECT * FROM uploads WHERE id = ?").get(job.person_upload_id);
     if (!row || row.deleted_at) throw new InputError("人物照片已被删除");
     images.push({ ...(await prepare(uploads.uploadFile(row), { lineArt: false, maxEdge })), name: "person" });
@@ -166,8 +177,9 @@ async function loadInputs(job) {
     if (!row || !fs.existsSync(imageFile(row.path))) throw new InputError("作为人物的作品图片已被删除");
     images.push({ ...(await prepare(imageFile(row.path), { lineArt: false, maxEdge })), name: "person" });
   }
-  // Scene and items follow the person, in the order the prompt numbers them.
-  const extras = [...(job.scene_asset_id ? [[job.scene_asset_id, "scene", "场景"]] : []),
+  // Hair, scene and items follow the person, in the order the prompt numbers them.
+  const extras = [...(job.hair_asset_id ? [[job.hair_asset_id, "hair", "发型"]] : []),
+    ...(job.scene_asset_id ? [[job.scene_asset_id, "scene", "场景"]] : []),
     ...JSON.parse(job.item_ids || "[]").map((id, i) => [id, `item-${i + 1}`, "物品"])];
   for (const [id, name, label] of extras) {
     const asset = library.getAsset(id);

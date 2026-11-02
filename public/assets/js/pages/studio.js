@@ -4,13 +4,13 @@ import { store, draft } from "../core/store.js";
 import { modal, toast, toastError, busy, confirmDialog } from "../core/ui.js";
 import { label, number } from "../core/format.js";
 import { navigate } from "../core/nav.js";
-import { libraryBrowser, usableNote, assetFee } from "../components/library-browser.js";
+import { libraryBrowser, libraryMeta, usableNote, assetFee } from "../components/library-browser.js";
 import { genCard, jobWatcher, cardSizeSwitch } from "../components/gen-card.js";
 import { openBoardDialog } from "../components/board.js";
 
 const RATIO_SHAPES = { "2:3": [2, 3], "3:4": [3, 4], "1:1": [1, 1], "4:3": [4, 3], "3:2": [3, 2], "9:16": [9, 16], "16:9": [16, 9] };
 const TIER_ORDER = ["standard", "hd", "uhd"];
-const PICKER_TITLE = { pose: "选择姿势", outfit: "选择服装", scene: "选择场景", item: "选择物品" };
+const PICKER_TITLE = { pose: "选择姿势", outfit: "选择服装", scene: "选择场景", item: "选择物品", hair: "选择发型" };
 
 function ratioShape(ratio) {
   const [w, hh] = RATIO_SHAPES[ratio] || [1, 1];
@@ -18,11 +18,12 @@ function ratioShape(ratio) {
   return h("span.ratio-shape", { "aria-hidden": "true", style: { width: `${Math.round(w * scale)}px`, height: `${Math.round(hh * scale)}px` } });
 }
 
-// The person in the studio: { source: "upload" | "image", id, url, virtual }.
-// Older drafts stored the upload itself.
+// The person in the studio: { source: "upload" | "image" | "library", id, url, virtual }.
+// A library portrait is an AI person, always virtual. Older drafts stored the upload itself.
 function normalizePerson(p) {
   if (!p?.id) return null;
   if (p.source === "image") return { source: "image", id: p.id, url: p.url, virtual: !!p.virtual };
+  if (p.source === "library") return { source: "library", id: p.id, url: p.url, virtual: true };
   return { source: "upload", id: p.id, url: p.url?.endsWith("/thumb") ? p.url : p.thumb || p.url,
     virtual: p.virtual === true || p.virtual === "approved" };
 }
@@ -47,6 +48,9 @@ export async function render(ctx) {
     person: normalizePerson(saved.person),
     sceneAsset: saved.sceneAsset || null,
     items: Array.isArray(saved.items) ? saved.items.slice(0, maxItems) : [],
+    hair: saved.hair || null,
+    // Send the pose's depth map along (only poses that have one).
+    poseDepth: !!saved.poseDepth,
     ratio: pick(saved.ratio, cfg.ratios, cfg.defaultRatio),
     tier: pick(saved.tier, cfg.tiers.map((t) => t.id), cfg.defaultTier),
     quality: pick(saved.quality, cfg.qualities.map((q) => q.id), cfg.defaultQuality),
@@ -58,12 +62,12 @@ export async function render(ctx) {
     prompt: typeof saved.prompt === "string" ? saved.prompt : ""
   };
   fitTier();
-  // Scene and items sit behind "更多参考" until opened or used.
-  let moreRefs = !!(saved.moreRefs || state.sceneAsset || state.items.length);
+  // Scene, hair and items sit behind "更多参考" until opened or used.
+  let moreRefs = !!(saved.moreRefs || state.sceneAsset || state.items.length || state.hair);
   // Uploads and works belong to whoever made them; drop them if the session changed.
   if (!store.user) { state.person = null; state.outfitUpload = null; }
 
-  // Links like /studio?pose=ID&outfit=ID&sceneId=ID&items=A,B&style=photo prefill the selection.
+  // Links like /studio?pose=ID&outfit=ID&sceneId=ID&items=A,B&hair=ID&style=photo prefill the selection.
   const fetchAsset = async (id) => (await api.get(`/api/library/assets/${encodeURIComponent(id)}`)).asset;
   const q = ctx.query;
   try {
@@ -71,10 +75,12 @@ export async function render(ctx) {
     if (q.outfit) { state.outfit = await fetchAsset(q.outfit); state.outfitUpload = null; }
     if (q.sceneId) { state.sceneAsset = await fetchAsset(q.sceneId); state.scene = ""; }
     if (q.items) state.items = await Promise.all(q.items.split(",").filter(Boolean).slice(0, maxItems).map(fetchAsset));
+    if (q.hair) state.hair = await fetchAsset(q.hair);
   } catch { toast("链接中的部分素材已下架", { type: "error" }); }
   // Image links expire after an hour or two, so renew what the draft kept, and
   // take off anything that is gone or outside what this account has unlocked.
-  const kept = [state.pose, state.outfit, state.sceneAsset, ...state.items].filter((a) => a?.id);
+  const libraryPerson = state.person?.source === "library" ? state.person : null;
+  const kept = [state.pose, state.outfit, state.sceneAsset, ...state.items, state.hair, libraryPerson].filter((a) => a?.id);
   if (kept.length) {
     try {
       const { items } = await api.get("/api/library/assets", { ids: kept.map((a) => a.id).join(",") });
@@ -90,15 +96,20 @@ export async function render(ctx) {
       state.outfit = renew(state.outfit);
       state.sceneAsset = renew(state.sceneAsset);
       state.items = state.items.map(renew).filter(Boolean);
+      state.hair = renew(state.hair);
+      if (libraryPerson) {
+        const face = renew(libraryPerson);
+        state.person = face ? { ...libraryPerson, url: face.thumb } : null;
+      }
       if (locked) toast(`有 ${locked} 个素材需要充值解锁，已从创作台移除`, { type: "error" });
       else if (gone) toast(`有 ${gone} 个素材已下架，已从创作台移除`, { type: "error" });
     } catch { /* keep the saved links */ }
   }
   if (q.style && cfg.styles.some((s) => s.id === q.style)) state.style = q.style;
   if (q.camera && (cfg.cameras || []).some((c) => c.id === q.camera)) state.camera = q.camera;
-  if (q.sceneId || q.items) moreRefs = true;
+  if (q.sceneId || q.items || q.hair) moreRefs = true;
   if (q.scene && cfg.scenes.some((s) => s.id === q.scene) && !state.sceneAsset) state.scene = q.scene;
-  if (q.pose || q.outfit || q.sceneId || q.items || q.style || q.scene || q.camera) history.replaceState({}, "", "/studio");
+  if (q.pose || q.outfit || q.sceneId || q.items || q.hair || q.style || q.scene || q.camera) history.replaceState({}, "", "/studio");
 
   const save = () => draft.write({ ...state, moreRefs });
   // A real person's photo limits what it can be combined with; a virtual person doesn't.
@@ -114,14 +125,15 @@ export async function render(ctx) {
     return h("button.btn", { type: "button", title: text, "aria-label": text, onclick }, cicon(iconName, color, 14));
   }
 
-  function ref({ key, title, optional, iconName, color, filled, image, code, note, fee, emptyText, onPick, tools }) {
+  function ref({ key, title, optional, iconName, color, filled, image, code, note, fee, emptyText, onPick, tools, extra }) {
     return h("div.ref", { class: `is-${key}` },
       h("div.ref-label", h("span.ref-title", title), code ? h("span.code.num", { title: code }, code) : optional ? h("span.code", "可选") : null),
       h("button.ref-frame", { type: "button", onclick: onPick, "aria-label": filled ? `更换${title}` : emptyText },
         filled ? h("img", { src: image, alt: title, decoding: "async" })
           : h("div.ref-empty", tile(iconName, color), h("span", emptyText))),
       note ? h("p.ref-note", note) : fee ? h("p.ref-fee", `使用费 ${fee} 点`) : null,
-      h("div.ref-tools", tools.filter(Boolean)));
+      h("div.ref-tools", tools.filter(Boolean)),
+      extra || null);
   }
 
   const noteFor = (asset) => (asset ? usableNote(asset, realPerson()) : "");
@@ -153,12 +165,17 @@ export async function render(ctx) {
   function renderRefs() {
     const real = realPerson();
     const poseNote = state.pose ? noteFor(state.pose) || (real && state.pose.people > 1 ? "双人姿势不能搭配真人照片" : "") : "";
-    const extras = [state.sceneAsset ? "场景" : "", state.items.length ? `${state.items.length} 件物品` : ""].filter(Boolean);
+    const extras = [state.sceneAsset ? "场景" : "", state.hair ? "发型" : "", state.items.length ? `${state.items.length} 件物品` : ""].filter(Boolean);
+    const depthSwitch = state.pose?.hasDepth
+      ? h("label.ref-depth", { title: "把这个姿势的深度图一起发给模型（越亮离镜头越近），前后关系和肢体遮挡更准" },
+        h("input", { type: "checkbox", checked: state.poseDepth, onchange: (e) => { state.poseDepth = e.target.checked; update(); } }),
+        h("span", "深度图辅助"))
+      : null;
     replace(refsEl,
       ref({
         key: "pose", title: "姿势", iconName: "pose", color: "purple", filled: !!state.pose,
         image: state.pose?.thumb || state.pose?.preview, code: state.pose?.code, note: poseNote, fee: assetFee(state.pose), emptyText: "选择姿势",
-        onPick: () => openPicker("pose"),
+        onPick: () => openPicker("pose"), extra: depthSwitch,
         tools: [
           toolButton("shuffle", "purple", "随机姿势", (e) => busy(e.currentTarget, () => randomize("pose"))),
           state.pose ? toolButton("close", "gray", "移除姿势", () => { state.pose = null; update(); }) : null
@@ -176,7 +193,7 @@ export async function render(ctx) {
       }),
       ref({
         key: "person", title: "人物", optional: !state.person, iconName: "person", color: "green", filled: !!state.person,
-        image: state.person?.url, code: state.person ? (state.person.virtual ? "虚拟人" : "真人") : "",
+        image: state.person?.url, code: state.person ? (state.person.source === "library" ? "AI 人像" : state.person.virtual ? "虚拟人" : "真人") : "",
         emptyText: "选择人物", onPick: () => openPersonDialog(),
         tools: [
           toolButton("photos", "blue", "选择人物", () => openPersonDialog()),
@@ -186,7 +203,7 @@ export async function render(ctx) {
     replace(moreEl,
       h("button.ref-more", { type: "button", "aria-expanded": String(moreRefs),
         onclick: () => { moreRefs = !moreRefs; update(); } },
-        icon("chevron", 14), moreRefs ? "收起场景和物品" : "更多参考：场景、物品",
+        icon("chevron", 14), moreRefs ? "收起场景、发型和物品" : "更多参考：场景、发型、物品",
         !moreRefs && extras.length ? h("span.ref-more-note", `已选 ${extras.join("、")}`) : null),
       moreRefs ? h("div.ref-grid.ref-grid-more", ref({
         key: "scene", title: "场景", optional: true, iconName: "mountain", color: "green", filled: !!state.sceneAsset,
@@ -195,6 +212,15 @@ export async function render(ctx) {
         tools: [
           toolButton("shuffle", "purple", "随机场景", (e) => busy(e.currentTarget, () => randomize("scene"))),
           state.sceneAsset ? toolButton("close", "gray", "移除场景", () => { state.sceneAsset = null; update(); }) : null
+        ]
+      }),
+      ref({
+        key: "hair", title: "发型", optional: true, iconName: "sparkle", color: "indigo", filled: !!state.hair,
+        image: state.hair?.thumb, note: noteFor(state.hair), fee: assetFee(state.hair), emptyText: "选择发型",
+        onPick: () => openPicker("hair"),
+        tools: [
+          toolButton("shuffle", "purple", "随机发型", (e) => busy(e.currentTarget, () => randomize("hair"))),
+          state.hair ? toolButton("close", "gray", "移除发型", () => { state.hair = null; update(); }) : null
         ]
       }),
       itemsRef()) : null);
@@ -209,6 +235,7 @@ export async function render(ctx) {
     if (type === "pose") state.pose = asset;
     else if (type === "outfit") { state.outfit = asset; state.outfitUpload = null; }
     else if (type === "scene") { state.sceneAsset = asset; state.scene = ""; }
+    else if (type === "hair") state.hair = asset;
     else if (state.items.some((a) => a.id === asset.id)) toast("这件物品已经选了", { type: "error" });
     else if (state.items.length >= maxItems) toast(`最多选择 ${maxItems} 件物品`, { type: "error" });
     else state.items = [...state.items, asset];
@@ -217,7 +244,7 @@ export async function render(ctx) {
   async function randomize(type) {
     try {
       const exclude = type === "pose" ? state.pose?.groupKey : type === "outfit" ? state.outfit?.id
-        : type === "scene" ? state.sceneAsset?.id : state.items.at(-1)?.id;
+        : type === "scene" ? state.sceneAsset?.id : type === "hair" ? state.hair?.id : state.items.at(-1)?.id;
       const { item } = await api.get("/api/library/random", { type, forAI: 1, withPerson: realPerson() ? 1 : 0, exclude });
       if (!item) { toast("没有可用的素材", { type: "error" }); return; }
       setAsset(type, item);
@@ -268,11 +295,19 @@ export async function render(ctx) {
     input.click();
   }
 
-  // ---------- person: upload a photo, reuse an earlier one, or take an image from a work
+  // ---------- person: upload a photo, reuse an earlier one, pick an AI portrait, or take an image from a work
 
   function openPersonDialog() {
     if (!requireLogin()) return;
-    let tab = cfg.allowPersonPhoto ? "upload" : "works";
+    let tab = cfg.allowPersonPhoto ? "upload" : "library";
+    // The 人像库 tab shows once the library turns out to have portraits.
+    let faces = null;
+    const hasFaces = (count) => {
+      faces = count;
+      if (!faces && tab === "library") { tab = "works"; show(); }
+      renderTabs();
+    };
+    libraryMeta().then((m) => hasFaces(m?.face?.total || 0), () => hasFaces(0));
     const body = h("div.person-body");
     const tabs = h("div.seg.person-tabs", { role: "tablist", "aria-label": "人物来源" });
     const m = modal({
@@ -289,7 +324,8 @@ export async function render(ctx) {
     }
 
     function renderTabs() {
-      const list = [cfg.allowPersonPhoto ? ["upload", "上传照片"] : null, cfg.allowPersonPhoto ? ["photos", "我的照片"] : null, ["works", "我的作品"]].filter(Boolean);
+      const list = [cfg.allowPersonPhoto ? ["upload", "上传照片"] : null, cfg.allowPersonPhoto ? ["photos", "我的照片"] : null,
+        faces !== 0 ? ["library", "人像库"] : null, ["works", "我的作品"]].filter(Boolean);
       replace(tabs, list.map(([value, text]) => h("button", { type: "button", role: "tab", "aria-selected": String(tab === value),
         "aria-pressed": String(tab === value), onclick: () => { tab = value; renderTabs(); show(); } }, text)));
     }
@@ -425,8 +461,16 @@ export async function render(ctx) {
         grid, h("div.lib-more-wrap", more));
     }
 
+    function libraryTab() {
+      const browser = libraryBrowser({ type: "face", mode: "picker",
+        onSelect: (asset) => choose({ source: "library", id: asset.id, url: asset.thumb, virtual: true }) });
+      return h("div.stack",
+        h("p.small.muted", "AI 生成的虚构人物，不是真实存在的人，不需要授权。按虚拟人处理：可以搭配任意姿势、服装、场景和物品，作品可以公开。"),
+        browser.node);
+    }
+
     async function show() {
-      const content = tab === "upload" ? uploadTab() : tab === "photos" ? await photosTab() : worksTab();
+      const content = tab === "upload" ? uploadTab() : tab === "photos" ? await photosTab() : tab === "library" ? libraryTab() : worksTab();
       replace(body, content);
     }
 
@@ -441,6 +485,7 @@ export async function render(ctx) {
       if (state.pose && (!state.pose.aiWithPerson || state.pose.people > 1)) { dropped.push("姿势"); state.pose = null; }
       if (state.outfit && !state.outfit.aiWithPerson) { dropped.push("服装"); state.outfit = null; }
       if (state.sceneAsset && !state.sceneAsset.aiWithPerson) { dropped.push("场景"); state.sceneAsset = null; }
+      if (state.hair && !state.hair.aiWithPerson) { dropped.push("发型"); state.hair = null; }
       const items = state.items.filter((a) => a.aiWithPerson);
       if (items.length < state.items.length) { dropped.push("物品"); state.items = items; }
       if (dropped.length) toast(`当前${dropped.join("、")}不能与真人照片同用，已移除，请重新选择`, { type: "error", timeout: 6000 });
@@ -542,20 +587,20 @@ export async function render(ctx) {
     if (!cfg.enabled) return cfg.maintenanceMessage || "生成服务维护中";
     const real = realPerson();
     const checks = [[state.pose, "姿势", "换一个"], [state.outfit, "服装", "换一套"], [state.sceneAsset, "场景", "换一个"],
-      ...state.items.map((a) => [a, "物品", "换一件"])];
+      [state.hair, "发型", "换一个"], ...state.items.map((a) => [a, "物品", "换一件"])];
     for (const [asset, name, fix] of checks) {
       const note = asset ? usableNote(asset, real) : "";
       if (note) return `所选${name}${note}，请${fix}`;
     }
     if (real && state.pose?.people > 1) return "双人姿势不能搭配真人照片";
-    const hasRefs = state.pose || state.outfit || state.outfitUpload || state.person || state.sceneAsset || state.items.length;
+    const hasRefs = state.pose || state.outfit || state.outfitUpload || state.person || state.sceneAsset || state.hair || state.items.length;
     if (!hasRefs && !cfg.allowTextOnly) return "请至少选择一张参考图";
     if (!hasRefs && !state.prompt.trim()) return "选一个姿势或服装，或者写下想要的画面";
     return "";
   }
 
   // Shared assets from other users add their price once per job.
-  const fees = () => [state.pose, state.outfit, state.sceneAsset, ...state.items].reduce((sum, a) => sum + assetFee(a), 0);
+  const fees = () => [state.pose, state.outfit, state.sceneAsset, state.hair, ...state.items].reduce((sum, a) => sum + assetFee(a), 0);
 
   function updateAction() {
     const fee = fees();
@@ -639,6 +684,8 @@ export async function render(ctx) {
         poseId: state.pose?.id, outfitId: state.outfit?.id, outfitUploadId: state.outfitUpload?.id,
         personUploadId: state.person?.source === "upload" ? state.person.id : undefined,
         personImageId: state.person?.source === "image" ? state.person.id : undefined,
+        personAssetId: state.person?.source === "library" ? state.person.id : undefined,
+        poseDepth: !!(state.poseDepth && state.pose?.hasDepth), hairId: state.hair?.id,
         sceneAssetId: state.sceneAsset?.id, itemIds: state.items.map((a) => a.id),
         prompt: state.prompt.trim(), style: state.style, scene: state.sceneAsset ? "" : state.scene,
         camera: state.camera, realism: state.realism,
@@ -649,7 +696,8 @@ export async function render(ctx) {
       store.patchUser({ credits: store.user.credits - generation.cost });
       canvas.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
-      if (["UPLOAD_GONE", "PERSON_IMAGE_GONE"].includes(err.code)) { state.person = null; state.outfitUpload = null; update(); }
+      if (["UPLOAD_GONE", "PERSON_IMAGE_GONE", "PERSON_UNAVAILABLE"].includes(err.code)) { state.person = null; state.outfitUpload = null; update(); }
+      if (err.code === "HAIR_UNAVAILABLE") { state.hair = null; update(); }
       if (err.code === "INSUFFICIENT_CREDITS") { store.refreshUser(); }
       toastError(err);
       // No channel delivers that size any more (it changed after the page loaded): redraw with the options left.

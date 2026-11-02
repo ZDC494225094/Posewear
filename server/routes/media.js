@@ -40,7 +40,7 @@ async function blurOf(asset) {
 // guessing ids, hotlinking and passing links around, and is rate limited.
 router.get("/library/:id/:variant", async (req, res) => {
   const { id, variant } = req.params;
-  if (!["thumb", "preview", "original", "blur"].includes(variant)) throw notFound();
+  if (!["thumb", "preview", "original", "blur", "depth", "depth-thumb"].includes(variant)) throw notFound();
   const asset = library.getAsset(id);
   const isAdmin = req.user?.role === "admin";
   if (!asset || (!isAdmin && !library.visible(asset, { loggedIn: !!req.user, userId: req.user?.id }))) {
@@ -59,11 +59,13 @@ router.get("/library/:id/:variant", async (req, res) => {
     const key = library.viewerKey(req.user, req.cookies?.[CSRF_COOKIE]);
     link = library.checkLink(asset.id, variant, req.query.t, key);
     if (!link) throw forbidden("图片链接已失效，请刷新页面", "LINK_EXPIRED");
-    guard.check(req, variant, key);
+    // A depth map counts as a thumbnail or a large preview.
+    guard.check(req, variant === "depth-thumb" ? "thumb" : variant === "depth" ? "preview" : variant, key);
   }
   if (variant === "original" && !isAdmin) {
     const policy = settings.get("library").originalDownload;
     if (policy === "disabled") throw forbidden("原图下载未开放", "DOWNLOAD_DISABLED");
+    if (!library.downloadable(asset)) throw forbidden("这个素材不提供原图下载", "DOWNLOAD_DISABLED");
     if (policy === "login" && !req.user) throw unauthorized("登录后可下载原图");
   }
   const file = library.assetFile(asset, variant);

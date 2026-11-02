@@ -77,7 +77,8 @@ export async function makeFixtureUpstream(dir) {
   fs.writeFileSync(path.join(dir, "costume-catalog.js"), `"use strict";\nwindow.COSTUME_GALLERY_CATALOG = ${JSON.stringify(outfits)};\n`);
 }
 
-export async function startApp({ env = {}, importUpstream = true } = {}) {
+// prepare({ env, tmp, upstream }) runs after the upstream import, before the server starts.
+export async function startApp({ env = {}, importUpstream = true, prepare = null } = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "posewear-test-"));
   const upstream = path.join(tmp, "upstream");
   await makeFixtureUpstream(upstream);
@@ -101,6 +102,7 @@ export async function startApp({ env = {}, importUpstream = true } = {}) {
     execFileSync(process.execPath, [path.join(ROOT, "scripts/import-upstream.js"), "--source", upstream, "--accept-license"],
       { env: baseEnv, stdio: "pipe" });
   }
+  if (prepare) await prepare({ env: baseEnv, tmp, upstream });
   const child = spawn(process.execPath, [path.join(ROOT, "server/index.js")], { env: baseEnv, stdio: ["ignore", "pipe", "pipe"] });
   let output = "";
   child.stdout.on("data", (d) => { output += d; });

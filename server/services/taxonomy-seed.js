@@ -484,6 +484,65 @@ export function addMinors(db, type, majorKey, rows, now = Date.now()) {
   return added;
 }
 
+// The libraries scripts/import-libraries.js brings in (migration 13): AI
+// portraits as 人像 (face), and CharaDB's anime hairstyles and eyes (发型,
+// hair), outfits and poses under majors of their own. They are imported, not
+// generated, so the asset generator doesn't offer them (gen_enabled 0).
+//   [key, 中文名, English name, hint, rating?]
+const HAIR_LENGTHS = [
+  ["short", "短发", "Short hair", "short hair"], ["medium", "中发", "Medium hair", "medium-length hair"],
+  ["semi-long", "中长发", "Semi-long hair", "semi-long hair"], ["long", "长发", "Long hair", "long hair"]
+];
+export const LIBRARY_TREES = [
+  { type: "face", key: "face", zh: "正脸参考", en: "Face reference", children: HAIR_LENGTHS },
+  { type: "face", key: "styling", zh: "造型参考", en: "Styling reference", children: HAIR_LENGTHS },
+  { type: "hair", key: "chara", zh: "二次元发型 · 眼睛", en: "Anime hair & eyes", children: [
+    ["style", "发型", "Hairstyle", "hairstyle"], ["bangs", "刘海", "Bangs", "bangs"], ["color", "发色", "Hair colour", "hair colour"],
+    ["acc", "发饰", "Hair accessory", "hair accessory"], ["eye-color", "瞳色", "Eye colour", "eye colour"],
+    ["eye-shape", "眼型", "Eye shape", "eye shape"]] },
+  { type: "outfit", key: "chara", zh: "二次元服装", en: "Anime outfits", children: [
+    ["chara-school", "制服 · 学生", "School uniforms", "school uniform"],
+    ["chara-casual-ss", "春夏休闲", "Casual · spring & summer", "casual spring and summer outfit"],
+    ["chara-casual-aw", "秋冬休闲", "Casual · autumn & winter", "casual autumn and winter outfit"],
+    ["chara-office", "通勤 · 职场", "Smart & office", "smart office outfit"],
+    ["chara-dress", "礼服 · 派对", "Dresses & party", "dress or party outfit"],
+    ["chara-wafuku", "和服", "Japanese clothing", "Japanese traditional clothing"],
+    ["chara-swim", "泳装", "Swimwear", "swimwear", "suggestive"],
+    ["chara-sports", "运动 · 社团", "Sports", "sportswear"],
+    ["chara-cosplay", "职业 · Cosplay", "Jobs & cosplay", "work uniform or costume"],
+    ["chara-fantasy", "奇幻", "Fantasy", "fantasy costume"],
+    ["chara-roomwear", "居家 · 睡衣", "Loungewear & pajamas", "loungewear or pajamas"],
+    ["chara-events", "节日 · 季节", "Events & seasons", "seasonal or event outfit"],
+    ["chara-idol", "偶像 · 舞台", "Idol & stage", "stage outfit"],
+    ["chara-gothic", "哥特洛丽塔 · 地雷系", "Gothic lolita & jirai-kei", "gothic lolita or jirai-kei fashion"],
+    ["chara-military", "军装 · 科幻", "Military & sci-fi", "military or sci-fi outfit"]] },
+  { type: "pose", key: "chara", zh: "二次元角色姿势", en: "Anime character poses", children: [
+    ["chara-stand", "站姿", "Standing", "standing"], ["chara-sit", "坐姿", "Sitting", "sitting"],
+    ["chara-lie", "躺卧", "Lying down", "lying down"], ["chara-crouch", "蹲姿 · 跪姿", "Crouching & kneeling", "crouching or kneeling"],
+    ["chara-upper", "上半身 · 手势", "Upper body & gestures", "upper body with a hand gesture"],
+    ["chara-motion", "动作", "In motion", "in motion"], ["chara-duo", "双人", "Two people", "two people together"],
+    ["chara-daily", "日常动作", "Everyday actions", "everyday action"]] }
+];
+
+// Adds the trees above; existing keys are left alone, so it can run again.
+export function addLibraryTrees(db, now = Date.now()) {
+  for (const tree of LIBRARY_TREES) {
+    let major = db.prepare("SELECT id FROM asset_categories WHERE type = ? AND key = ? AND parent_id IS NULL").get(tree.type, tree.key);
+    if (!major) {
+      const last = db.prepare("SELECT COALESCE(MAX(sort), 0) AS s FROM asset_categories WHERE type = ? AND parent_id IS NULL").get(tree.type).s;
+      const id = db.prepare(`INSERT INTO asset_categories (type, parent_id, key, name_zh, name_en, hint, rating, gen_enabled, sort,
+        created_at, updated_at) VALUES (?, NULL, ?, ?, ?, '', 'general', 0, ?, ?, ?)`).run(tree.type, tree.key, tree.zh, tree.en, last + 10, now, now).lastInsertRowid;
+      major = { id };
+    }
+    const exists = db.prepare("SELECT 1 FROM asset_categories WHERE parent_id = ? AND key = ?");
+    tree.children.forEach(([key, zh, en, hint, rating = "general"], i) => {
+      if (exists.get(major.id, key)) return;
+      db.prepare(`INSERT INTO asset_categories (type, parent_id, key, name_zh, name_en, hint, rating, gen_enabled, sort,
+        created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`).run(tree.type, major.id, key, zh, en, hint, rating, (i + 1) * 10, now, now);
+    });
+  }
+}
+
 // Where the imported outfit categories sit in the tree.
 export const UPSTREAM_OUTFIT_SERIES = {
   spring: "daily", summer: "daily", autumn: "daily", winter: "daily",

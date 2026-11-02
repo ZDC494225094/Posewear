@@ -123,7 +123,8 @@ function validate(user, input, { admin }) {
     return { type: "pose", source, angles, description: "", gender, season: "", time: "", name: "" };
   }
 
-  const type = v.oneOf(input.type, "type", library.ASSET_TYPES);
+  // Faces and hair come from imported libraries, not the generator.
+  const type = v.oneOf(input.type, "type", Object.keys(SPEC));
   const minor = taxonomy.get(Number(input.categoryId));
   if (!minor || minor.type !== type || !minor.parent_id) throw badRequest("INVALID_CATEGORY", "请选择素材的小类");
   if (!taxonomy.generatable(minor, { admin })) throw badRequest("CATEGORY_CLOSED", "这个分类暂不开放生成");

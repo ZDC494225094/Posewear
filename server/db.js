@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { config } from "./config.js";
 import { seedCategories, addMinors, addMajor, seedWeddingScenes, OUTFIT_TREE, UPSTREAM_OUTFIT_SERIES, MORE_PROFESSIONS,
-  WEDDING_OUTFIT_TREES, WEDDING_PLATE_TREE } from "./services/taxonomy-seed.js";
+  WEDDING_OUTFIT_TREES, WEDDING_PLATE_TREE, addLibraryTrees } from "./services/taxonomy-seed.js";
 import { outputTokens } from "./services/sizes.js";
 
 export const db = new Database(config.dbFile);
@@ -713,6 +713,104 @@ const migrations = [
       insert.run(c.id, c.model || "gpt-image-2", JSON.stringify(forModel), c.size_limit, c.success_count, c.failure_count,
         c.last_ok_at, c.last_error, c.last_error_at, c.created_at, c.updated_at);
       keep.run(JSON.stringify(forChannel), c.id);
+    }
+  },
+  // 13: more libraries (scripts/import-libraries.js). Two asset types: face
+  // (AI portraits used as the person in a work) and hair (anime hairstyles and
+  // eyes). Poses get a depth map of the same pose (depth_path,
+  // depth_thumb_path). Works record a library face as the person, a hair
+  // reference, and whether the pose's depth map went along. The CHECKs can't be
+  // altered, so assets and asset_categories are rebuilt as in migration 3.
+  (conn) => {
+    conn.pragma("defer_foreign_keys = ON");
+    const types = "'pose', 'outfit', 'scene', 'item', 'face', 'hair'";
+    const hasColumn = (table, column) => !!conn.prepare(`SELECT 1 FROM pragma_table_info('${table}') WHERE name = ?`).get(column);
+    const assetColumns = `id, type, group_key, code, series, series_zh, series_en, category, category_zh, category_en,
+      category_ja, name, name_zh, name_en, angle, angle_zh, angle_en, keywords, people, root, thumb_path, preview_path,
+      original_path, rating, enabled, sort, source, use_count, created_at, updated_at, owner_id, license, visibility,
+      review, review_note, price, earned, job_id, published_at`;
+    const depth = hasColumn("assets", "depth_path") ? ", depth_path, depth_thumb_path" : "";
+    conn.exec(`
+    CREATE TABLE assets_v13 (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL CHECK (type IN (${types})),
+      group_key TEXT NOT NULL,
+      code TEXT NOT NULL DEFAULT '',
+      series TEXT NOT NULL DEFAULT '',
+      series_zh TEXT NOT NULL DEFAULT '',
+      series_en TEXT NOT NULL DEFAULT '',
+      category TEXT NOT NULL DEFAULT '',
+      category_zh TEXT NOT NULL DEFAULT '',
+      category_en TEXT NOT NULL DEFAULT '',
+      category_ja TEXT NOT NULL DEFAULT '',
+      name TEXT NOT NULL DEFAULT '',
+      name_zh TEXT NOT NULL DEFAULT '',
+      name_en TEXT NOT NULL DEFAULT '',
+      angle TEXT NOT NULL DEFAULT '',
+      angle_zh TEXT NOT NULL DEFAULT '',
+      angle_en TEXT NOT NULL DEFAULT '',
+      keywords TEXT NOT NULL DEFAULT '',
+      people INTEGER NOT NULL DEFAULT 1,
+      root TEXT NOT NULL DEFAULT 'library' CHECK (root IN ('library', 'custom')),
+      thumb_path TEXT NOT NULL,
+      preview_path TEXT NOT NULL DEFAULT '',
+      original_path TEXT NOT NULL,
+      rating TEXT NOT NULL DEFAULT 'general' CHECK (rating IN ('general', 'suggestive', 'explicit')),
+      enabled INTEGER NOT NULL DEFAULT 1,
+      sort INTEGER NOT NULL DEFAULT 0,
+      source TEXT NOT NULL DEFAULT 'upstream',
+      use_count INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      owner_id INTEGER REFERENCES users(id),
+      license TEXT NOT NULL DEFAULT 'commercial' CHECK (license IN ('commercial', 'noncommercial')),
+      visibility TEXT NOT NULL DEFAULT 'public' CHECK (visibility IN ('public', 'private')),
+      review TEXT NOT NULL DEFAULT 'none' CHECK (review IN ('none', 'pending', 'approved', 'rejected')),
+      review_note TEXT NOT NULL DEFAULT '',
+      price INTEGER NOT NULL DEFAULT 0 CHECK (price >= 0),
+      earned INTEGER NOT NULL DEFAULT 0,
+      job_id TEXT,
+      published_at INTEGER,
+      depth_path TEXT NOT NULL DEFAULT '',
+      depth_thumb_path TEXT NOT NULL DEFAULT ''
+    );
+    INSERT INTO assets_v13 (${assetColumns}${depth}) SELECT ${assetColumns}${depth} FROM assets;
+    DROP TABLE assets;
+    ALTER TABLE assets_v13 RENAME TO assets;
+    CREATE INDEX idx_assets_type ON assets(type, sort);
+    CREATE INDEX idx_assets_group ON assets(group_key);
+    CREATE INDEX idx_assets_owner ON assets(owner_id, type);
+    CREATE INDEX idx_assets_review ON assets(review);
+
+    CREATE TABLE asset_categories_v13 (
+      id INTEGER PRIMARY KEY,
+      type TEXT NOT NULL CHECK (type IN (${types})),
+      parent_id INTEGER REFERENCES asset_categories_v13(id) ON DELETE CASCADE,
+      key TEXT NOT NULL,
+      name_zh TEXT NOT NULL,
+      name_en TEXT NOT NULL DEFAULT '',
+      hint TEXT NOT NULL DEFAULT '',
+      rating TEXT NOT NULL DEFAULT 'general' CHECK (rating IN ('general', 'suggestive', 'explicit')),
+      gen_enabled INTEGER NOT NULL DEFAULT 1,
+      sort INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    INSERT INTO asset_categories_v13 (id, type, parent_id, key, name_zh, name_en, hint, rating, gen_enabled, sort, created_at, updated_at)
+      SELECT id, type, parent_id, key, name_zh, name_en, hint, rating, gen_enabled, sort, created_at, updated_at
+      FROM asset_categories ORDER BY parent_id IS NOT NULL, id;
+    DROP TABLE asset_categories;
+    ALTER TABLE asset_categories_v13 RENAME TO asset_categories;
+    CREATE UNIQUE INDEX idx_cat_major ON asset_categories(type, key) WHERE parent_id IS NULL;
+    CREATE UNIQUE INDEX idx_cat_minor ON asset_categories(parent_id, key) WHERE parent_id IS NOT NULL;
+    `);
+    for (const [column, type] of [["person_asset_id", "TEXT"], ["hair_asset_id", "TEXT"], ["pose_depth", "INTEGER NOT NULL DEFAULT 0"]]) {
+      if (!hasColumn("generations", column)) conn.exec(`ALTER TABLE generations ADD COLUMN ${column} ${type}`);
+    }
+    addLibraryTrees(conn);
+    for (const table of ["assets", "asset_categories"]) {
+      const broken = conn.pragma(`foreign_key_check(${table})`);
+      if (broken.length) throw new Error(`Migration 13 left ${broken.length} broken foreign key(s) in ${table}`);
     }
   }
 ];

@@ -56,6 +56,9 @@ export function useInStudio(asset) {
   if (asset.type === "pose") draft.patch({ pose: asset });
   else if (asset.type === "outfit") draft.patch({ outfit: asset, outfitUpload: null });
   else if (asset.type === "scene") draft.patch({ sceneAsset: asset, scene: "" });
+  else if (asset.type === "hair") draft.patch({ hair: asset, moreRefs: true });
+  // A portrait is an AI person who doesn't exist: the work's person, as a virtual one.
+  else if (asset.type === "face") draft.patch({ person: { source: "library", id: asset.id, url: asset.thumb, virtual: true } });
   else {
     const items = (draft.read().items || []).filter((a) => a.id !== asset.id);
     const max = store.config.generation.maxItems || 3;
@@ -66,10 +69,12 @@ export function useInStudio(asset) {
 }
 
 const EMPTY = { series: "", category: "", angle: "", q: "", origin: "", license: "", view: "group" };
-export const TYPE_TEXT = { pose: "姿势", outfit: "服装", scene: "场景", item: "物品" };
-const PATHS = { pose: "/api/library/poses", outfit: "/api/library/outfits", scene: "/api/library/scenes", item: "/api/library/items" };
-const UNITS = { outfit: "套服装", scene: "个场景", item: "件物品" };
-const SEARCH_HINT = { pose: "搜索姿势名称、编号", outfit: "搜索颜色、单品、编号", scene: "搜索地点、氛围", item: "搜索名称、材质、颜色" };
+export const TYPE_TEXT = { pose: "姿势", outfit: "服装", scene: "场景", item: "物品", face: "人像", hair: "发型" };
+const PATHS = { pose: "/api/library/poses", outfit: "/api/library/outfits", scene: "/api/library/scenes", item: "/api/library/items",
+  face: "/api/library/faces", hair: "/api/library/hairs" };
+const UNITS = { outfit: "套服装", scene: "个场景", item: "件物品", face: "张人像", hair: "个发型" };
+const SEARCH_HINT = { pose: "搜索姿势名称、编号", outfit: "搜索颜色、单品、编号", scene: "搜索地点、氛围", item: "搜索名称、材质、颜色",
+  face: "搜索发型、发长", hair: "搜索发型、发色、瞳色" };
 
 export function libraryBrowser({ type = "pose", mode = "page", withPerson = false, filters: initial = {}, onSelect, onOpen, onFiltersChange }) {
   const state = {
@@ -195,7 +200,7 @@ export function libraryBrowser({ type = "pose", mode = "page", withPerson = fals
     const note = mode === "picker" ? usableNote(asset, withPerson) : "";
     const angles = isGroup ? item.images.length : 0;
     // Imported outfits have no names, only codes.
-    const name = state.type !== "outfit" || asset.generated ? label(asset.name) || asset.id : asset.id;
+    const name = asset.named ? label(asset.name) || asset.id : asset.id;
     const tags = state.type === "pose"
       ? [label(asset.category), angles > 1 ? `${angles} 个角度` : label(asset.angle)]
       : [label(asset.category)];
@@ -211,7 +216,7 @@ export function libraryBrowser({ type = "pose", mode = "page", withPerson = fals
 
   // Outside the free share: blurred stand-in, the name, and a way to unlock.
   function lockedCard(asset, angles) {
-    const name = state.type !== "outfit" || asset.generated ? label(asset.name) || asset.id : asset.id;
+    const name = asset.named ? label(asset.name) || asset.id : asset.id;
     const tags = [label(asset.category), angles > 1 ? `${angles} 个角度` : ""];
     return h("article.asset-card.is-locked",
       h("button.asset-hit", { type: "button", "aria-label": `${name}（需要解锁）`, onclick: unlockPrompt },
@@ -278,7 +283,8 @@ export function libraryBrowser({ type = "pose", mode = "page", withPerson = fals
         grid.replaceChildren(emptyState({ title: "没有找到匹配的素材", text: "换个关键词，或清除筛选条件试试。",
           action: h("button.btn", { type: "button", onclick: () => setFilter({ ...EMPTY, view: state.filters.view }) }, "清除筛选") }));
       } else if (!state.items.length) {
-        const canGenerate = store.config.assets.generation;
+        // Portraits and hairstyles are imported libraries, not generated.
+        const canGenerate = store.config.assets.generation && !["face", "hair"].includes(state.type);
         grid.replaceChildren(emptyState({ icon: "wand", color: "purple", title: `还没有${TYPE_TEXT[state.type]}素材`,
           text: canGenerate ? `可以在「我的素材」里按分类生成${TYPE_TEXT[state.type]}，生成后自己可以直接使用。` : "管理员添加后会出现在这里。",
           action: canGenerate && mode === "page" ? h("a.btn.btn-primary", { href: store.user ? `/my-assets?generate=${state.type}` : "/login" }, "生成素材") : null }));

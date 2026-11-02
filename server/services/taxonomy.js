@@ -6,8 +6,9 @@ import { randomId } from "../lib/crypto.js";
 // reference it by key: series = major key, category = minor key. Small
 // enough to keep in memory; rebuilt after every edit.
 
-// Poses, outfits, scenes (backgrounds) and items (accessories and props).
-export const ASSET_TYPES = ["pose", "outfit", "scene", "item"];
+// Poses, outfits, scenes (backgrounds) and items (accessories and props), plus
+// two imported libraries: faces (AI portraits) and hair (hairstyles and eyes).
+export const ASSET_TYPES = ["pose", "outfit", "scene", "item", "face", "hair"];
 const RATINGS = ["general", "suggestive", "explicit"];
 const KEY = /^[\p{L}\p{N}][\p{L}\p{N}_\-・]{0,39}$/u;
 let cache = null;

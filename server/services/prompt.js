@@ -4,19 +4,20 @@ const fill = (template, values) =>
   String(template || "").replace(/\{(\w+)\}/g, (all, key) => (key in values ? String(values[key]) : all));
 
 // Assemble the model prompt from the admin-editable template lines. The image
-// numbers here must match the order images are sent in: pose, outfit, person,
-// scene, items. personKind is "none", "real" (a real person's photo) or
-// "virtual". A scene image replaces the scene preset. camera is a lens preset;
-// realism adds the "real, unretouched photograph" line.
-export function buildPrompt({ pose, outfit, outfitKeywords = "", personKind = "none", style, scene, sceneAsset = null,
-  items = [], camera = null, realism = false, userText = "" }) {
+// numbers here must match the order images are sent in: pose, the pose's depth
+// map, outfit, person, hair, scene, items. personKind is "none", "real" (a real
+// person's photo) or "virtual". A scene image replaces the scene preset. camera
+// is a lens preset; realism adds the "real, unretouched photograph" line.
+export function buildPrompt({ pose, poseDepth = false, outfit, outfitKeywords = "", personKind = "none", style, scene, sceneAsset = null,
+  items = [], hair = null, camera = null, realism = false, userText = "" }) {
   const p = settings.get("prompt");
   const lines = [];
   let n = 0;
   const person = personKind !== "none";
-  const hasImages = !!(pose || outfit || person || sceneAsset || items.length);
+  const hasImages = !!(pose || outfit || person || sceneAsset || items.length || hair);
   lines.push(hasImages ? p.intro : p.textOnlyIntro);
   if (pose) lines.push(fill(pose.people > 1 ? p.poseDuo : p.pose, { n: ++n }));
+  if (pose && poseDepth) lines.push(fill(p.poseDepth, { n: ++n }));
   if (outfit) {
     let line = fill(p.outfit, { n: ++n });
     if (outfitKeywords) line += ` Key pieces: ${outfitKeywords}.`;
@@ -27,6 +28,7 @@ export function buildPrompt({ pose, outfit, outfitKeywords = "", personKind = "n
     const safety = personKind === "real" ? p.personSafety : p.virtualPersonSafety;
     if (safety) lines.push(safety);
   }
+  if (hair) lines.push(fill(p.hair, { n: ++n, name: hairName(hair) }));
   if (sceneAsset) lines.push(fill(p.sceneImage, { n: ++n }));
   for (const item of items) lines.push(fill(p.item, { n: ++n, name: itemName(item) }));
   if (style?.prompt) lines.push(fill(p.style, { value: style.prompt }));
@@ -43,6 +45,13 @@ export function buildPrompt({ pose, outfit, outfitKeywords = "", personKind = "n
 function itemName(item) {
   const name = item._category?.en || item.category_en || item.name_en || "accessory";
   return String(name).toLowerCase();
+}
+
+// What a hair reference shows, in English: its category, then its tags
+// ("hairstyle: long hair, black hair", "eye colour: blue eyes").
+function hairName(hair) {
+  const kind = String(hair._category?.en || hair.category_en || "hairstyle").toLowerCase();
+  return hair.name_en ? `${kind}: ${hair.name_en}` : kind;
 }
 
 // Banned-word screen for user text. CJK terms match as substrings; Latin terms

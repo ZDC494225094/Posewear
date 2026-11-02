@@ -35,10 +35,21 @@ function refsOf(g) {
   const r = g.refs || {};
   const asset = (label, a) => a && out.push({ label, name: a.name ? `${a.name} · ${a.id}` : `${a.id || ""}（已下架）`, thumb: a.thumb, full: a.preview || a.thumb });
   asset("姿势", r.pose);
+  // Sent right after the pose when the user ticked 深度图辅助.
+  if (r.poseDepth && r.pose?.id) {
+    const base = `/media/library/${encodeURIComponent(r.pose.id)}`;
+    out.push({ label: "深度图", name: `姿势 ${r.pose.id} 的深度图`, thumb: `${base}/depth-thumb`, full: `${base}/depth` });
+  }
   if (r.outfit?.upload) out.push({ label: "服装", name: r.outfit.thumb ? "用户上传的服装图" : "用户上传的服装图（已过期或删除）", thumb: r.outfit.thumb, full: r.outfit.url });
   else asset("服装", r.outfit);
-  if (r.person) out.push({ label: "人物", name: `${PERSON_TEXT[r.person.kind] || "人物"}${r.person.source === "image" ? "，取自作品图片" : ""}${r.person.thumb ? "" : "（已删除）"}`,
-    thumb: r.person.thumb, full: r.person.url });
+  if (r.person?.source === "library") {
+    out.push({ label: "人物", name: `人像库 · ${r.person.name ? `${r.person.name} · ` : ""}${r.person.id}${r.person.thumb ? "" : "（已下架）"}`,
+      thumb: r.person.thumb, full: r.person.url });
+  } else if (r.person) {
+    out.push({ label: "人物", name: `${PERSON_TEXT[r.person.kind] || "人物"}${r.person.source === "image" ? "，取自作品图片" : ""}${r.person.thumb ? "" : "（已删除）"}`,
+      thumb: r.person.thumb, full: r.person.url });
+  }
+  asset("发型", r.hair);
   asset("场景", r.scene);
   (r.items || []).forEach((item, i) => asset(`物品 ${i + 1}`, item));
   return out;
