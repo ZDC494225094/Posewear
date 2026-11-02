@@ -63,7 +63,9 @@ notifyRouter.post("/pay/notify/alipay", express.urlencoded({ extended: false, li
 // answer makes it retry, so a rejected signature answers "fail".
 notifyRouter.all("/pay/notify/epay", express.urlencoded({ extended: false, limit: "64kb" }), (req, res) => {
   try {
-    const params = { ...req.query, ...(req.method === "POST" && req.body && typeof req.body === "object" ? req.body : {}) };
+    // One source of fields: the form for a POST that has one, else the query string.
+    const form = req.method === "POST" && req.body && typeof req.body === "object" && Object.keys(req.body).length ? req.body : null;
+    const params = { ...(form || req.query) };
     res.type("text/plain").send(billing.handleEpayNotify(params) ? "success" : "fail");
   } catch (err) {
     log.error("EPay notify handling failed", err);

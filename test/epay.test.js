@@ -97,6 +97,38 @@ test("an order goes to submit.php signed, and the signed notification credits it
   assert.equal(await balance(), start + p.totalCredits, "credited once");
 });
 
+test("a reused request signature, repeated fields or another gateway's order don't confirm a payment", async () => {
+  const p = await pkg();
+  const start = await balance();
+  const order = (await user.post("/api/billing/orders", { packageId: p.id, provider: "epay", method: "alipay" })).data.order;
+  // The buyer holds the signed submit.php URL; sent back as a "notification" it must not count.
+  const request = Object.fromEntries(new URL(order.pay.url).searchParams);
+  assert.equal(await notify({ ...request, trade_status: "TRADE_SUCCESS" }), "fail");
+  assert.equal(await notify(request), "fail", "fields a notification doesn't have");
+  const paid = { pid: "1001", trade_no: "2026110222002", out_trade_no: order.id, type: "alipay", name: request.name, money: "9.9",
+    trade_status: "TRADE_SUCCESS", sign_type: "MD5" };
+  const sign = signOf(paid);
+  const repeated = new URLSearchParams({ ...paid, sign });
+  repeated.append("money", "0.01");
+  assert.equal(await client(app.base).raw(`/api/pay/notify/epay?${repeated}`).then((r) => r.text()), "fail", "a repeated field");
+  assert.equal((await user.get(`/api/billing/orders/${order.id}`)).data.order.status, "pending");
+  // Newer gateways send the amount as a number ("9.9" for 9.90).
+  assert.equal(await notify({ ...paid, sign }), "success");
+  assert.equal((await user.get(`/api/billing/orders/${order.id}`)).data.order.status, "paid");
+  assert.equal(await balance(), start + p.totalCredits);
+
+  // A correctly signed 易支付 notification for an order made another way is refused.
+  await admin.put("/api/admin/settings/payment", { value: { mock: { enabled: true } } });
+  try {
+    const mock = (await user.post("/api/billing/orders", { packageId: p.id, provider: "mock" })).data.order;
+    const other = { ...paid, trade_no: "2026110222003", out_trade_no: mock.id, money: "9.90" };
+    assert.equal(await notify({ ...other, sign: signOf(other) }), "fail");
+    assert.equal((await user.get(`/api/billing/orders/${mock.id}`)).data.order.status, "pending");
+  } finally {
+    await admin.put("/api/admin/settings/payment", { value: { mock: { enabled: false } } });
+  }
+});
+
 test("mapi.php orders show the gateway's QR code, and the order query confirms a payment", async () => {
   await admin.put("/api/admin/settings/payment", { value: { epay: { mode: "api" } } });
   const start = await balance();

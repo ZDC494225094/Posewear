@@ -143,7 +143,7 @@ export async function createOrder(user, { packageId, provider, method }, { baseU
       pay = await wechat.create(payment.wechat, order, { notifyUrl: `${baseUrl}/api/pay/notify/wechat` });
     } else if (provider === "epay") {
       pay = await epay.create(payment.epay, order, {
-        notifyUrl: `${baseUrl}/api/pay/notify/epay`, returnUrl: `${baseUrl}/pay/${order.id}?from=return`, method, clientIp, device
+        notifyUrl: `${baseUrl}/api/pay/notify/epay`, returnUrl: `${baseUrl}/pay/${order.id}`, method, clientIp, device
       });
     } else {
       pay = { type: "mock" };
@@ -172,11 +172,19 @@ export function listOrders(userId, { offset, size }) {
 }
 
 // Idempotent: the first confirmation credits the account, later ones no-op.
-// A payment that arrives after the order expired is still honoured.
-export const markPaid = tx((orderId, { tradeNo = "", amountCents, source }) => {
+// A payment that arrives after the order expired is still honoured. A gateway's
+// notification only confirms orders made through that gateway (provider).
+export const markPaid = tx((orderId, { tradeNo = "", amountCents, source, provider }) => {
   const o = db.prepare("SELECT * FROM orders WHERE id = ?").get(orderId);
   if (!o) throw notFound("订单不存在");
-  if (o.status === "paid") return { already: true, order: orderDto(o) };
+  if (provider && o.provider !== provider) throw badRequest("PROVIDER_MISMATCH", `订单不是通过 ${provider} 下的`);
+  if (o.status === "paid") {
+    // Another trade for an order already paid: the buyer may have paid twice.
+    if (tradeNo && o.provider_trade_no && tradeNo !== o.provider_trade_no) {
+      log.warn(`Order ${o.id} was already paid as ${o.provider_trade_no}; ${source} reports another payment ${tradeNo} — check for a refund`);
+    }
+    return { already: true, order: orderDto(o) };
+  }
   if (o.status === "refunded") throw conflict("ORDER_REFUNDED", "订单已退款");
   if (amountCents !== undefined && amountCents !== o.amount_cents) {
     throw badRequest("AMOUNT_MISMATCH", `支付金额不一致：订单 ${o.amount_cents}，回调 ${amountCents}`);
@@ -218,7 +226,7 @@ export function handleAlipayNotify(body) {
   const cfg = settings.get("payment").alipay;
   const parsed = alipay.parseNotify(cfg, body);
   if (!parsed) { log.warn("Alipay notify rejected: bad signature or app id"); return false; }
-  if (parsed.paid) markPaid(parsed.orderId, { tradeNo: parsed.tradeNo, amountCents: parsed.amountCents, source: "alipay-notify" });
+  if (parsed.paid) markPaid(parsed.orderId, { tradeNo: parsed.tradeNo, amountCents: parsed.amountCents, source: "alipay-notify", provider: "alipay" });
   return true;
 }
 
@@ -226,7 +234,7 @@ export function handleWechatNotify(headers, rawBody) {
   const cfg = settings.get("payment").wechat;
   const parsed = wechat.parseNotify(cfg, headers, rawBody);
   if (!parsed) { log.warn("WeChat Pay notify rejected: bad signature"); return false; }
-  if (parsed.paid) markPaid(parsed.orderId, { tradeNo: parsed.tradeNo, amountCents: parsed.amountCents, source: "wechat-notify" });
+  if (parsed.paid) markPaid(parsed.orderId, { tradeNo: parsed.tradeNo, amountCents: parsed.amountCents, source: "wechat-notify", provider: "wechat" });
   return true;
 }
 
@@ -235,7 +243,7 @@ export function handleEpayNotify(params) {
   const cfg = settings.get("payment").epay;
   const parsed = epay.parseNotify(cfg, params);
   if (!parsed) { log.warn("EPay notify rejected: bad signature or merchant id"); return false; }
-  if (parsed.paid) markPaid(parsed.orderId, { tradeNo: parsed.tradeNo, amountCents: parsed.amountCents, source: "epay-notify" });
+  if (parsed.paid) markPaid(parsed.orderId, { tradeNo: parsed.tradeNo, amountCents: parsed.amountCents, source: "epay-notify", provider: "epay" });
   return true;
 }
 

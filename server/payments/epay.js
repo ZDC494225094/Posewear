@@ -16,14 +16,20 @@ export function gatewayOf(raw) {
   return base.replace(/\/(submit|mapi|api)\.php$/i, "");
 }
 
-// Content to sign: non-empty parameters except sign and sign_type, sorted by
-// key, joined as k=v with & (values unencoded), the key appended directly.
+// Content to sign: parameters except sign, sign_type and blank values, sorted
+// by key, joined as k=v with & (values unencoded), the key appended directly.
 export function signContent(params) {
   return Object.keys(params)
-    .filter((k) => k !== "sign" && k !== "sign_type" && params[k] !== undefined && params[k] !== null && params[k] !== "")
+    .filter((k) => k !== "sign" && k !== "sign_type" && params[k] !== undefined && params[k] !== null && String(params[k]).trim() !== "")
     .sort()
     .map((k) => `${k}=${params[k]}`)
     .join("&");
+}
+
+// "9.90", "9.9" and "9" (newer gateways send the amount as a number) in cents; NaN otherwise.
+export function centsOf(money) {
+  const m = /^(\d{1,9})(?:\.(\d{1,2}))?$/.exec(String(money ?? ""));
+  return m ? Number(m[1]) * 100 + Number((m[2] || "").padEnd(2, "0")) : NaN;
 }
 
 export const sign = (params, key) => crypto.createHash("md5").update(signContent(params) + key, "utf8").digest("hex");
@@ -53,7 +59,9 @@ export async function create(cfg, order, { notifyUrl, returnUrl, method, clientI
   const res = await fetch(`${gateway}/mapi.php`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded;charset=utf-8" },
-    body: new URLSearchParams(signed(cfg, { ...params, clientip: clientIp || "127.0.0.1", device: device || "pc" })).toString(),
+    // The gateway validates clientip as an IP; IPv4 clients come in IPv6-mapped ("::ffff:1.2.3.4").
+    body: new URLSearchParams(signed(cfg, { ...params, clientip: String(clientIp || "127.0.0.1").replace(/^::ffff:/i, ""),
+      device: device || "pc" })).toString(),
     signal: AbortSignal.timeout(15_000)
   });
   const text = await res.text();
@@ -65,14 +73,27 @@ export async function create(cfg, order, { notifyUrl, returnUrl, method, clientI
   throw new Error("易支付没有返回支付地址");
 }
 
-// Notification parameters (query string or form). null when the signature or
-// the merchant ID doesn't match.
+// The fields a payment notification carries. With MD5 the same key signs our
+// requests and the gateway's notifications, and the buyer holds a signed
+// request (the submit.php URL), so a notification with other fields, or with
+// "&" or "=" folded into a value, could be a request signature reused.
+const NOTIFY_FIELDS = new Set(["pid", "trade_no", "out_trade_no", "type", "name", "money", "trade_status", "param", "sign", "sign_type"]);
+
+// Notification parameters (query string or form). null when a field is
+// unexpected or repeated, or the signature or merchant ID doesn't match.
 export function parseNotify(cfg, params) {
-  if (!params || String(params.pid || "") !== String(cfg.pid || "") || !verify(params, cfg.key)) return null;
+  if (!params || typeof params !== "object") return null;
+  for (const [key, value] of Object.entries(params)) {
+    if (!NOTIFY_FIELDS.has(key) || typeof value !== "string") return null;
+    if (key !== "name" && /[&=]/.test(value)) return null;
+  }
+  if (String(params.pid || "") !== String(cfg.pid || "") || !verify(params, cfg.key)) return null;
+  const amountCents = centsOf(params.money);
+  if (!Number.isFinite(amountCents)) return null;
   return {
     orderId: String(params.out_trade_no || ""),
     tradeNo: String(params.trade_no || ""),
-    amountCents: Math.round(Number(params.money) * 100),
+    amountCents,
     paid: params.trade_status === "TRADE_SUCCESS"
   };
 }
@@ -88,5 +109,5 @@ export async function query(cfg, order) {
   const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
   const json = await res.json().catch(() => null);
   if (!json || Number(json.code) !== 1) return { paid: false, message: json?.msg };
-  return { paid: Number(json.status) === 1, tradeNo: String(json.trade_no || ""), amountCents: Math.round(Number(json.money) * 100) };
+  return { paid: Number(json.status) === 1, tradeNo: String(json.trade_no || ""), amountCents: centsOf(json.money) };
 }

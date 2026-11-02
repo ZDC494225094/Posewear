@@ -13,6 +13,25 @@ process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "posewear-pay-"));
 
 const alipay = await import("../server/payments/alipay.js");
 const wechat = await import("../server/payments/wechat.js");
+const epay = await import("../server/payments/epay.js");
+
+test("epay: MD5 over the sorted fields without sign, sign_type and blanks, key appended", () => {
+  // The sample request and notification of the 彩虹易支付 docs, with the docs' sample key.
+  const key = "89unJUB8HZ54Hj7x4nUj56HN4nUzUJ8i";
+  const request = { pid: "1001", type: "alipay", out_trade_no: "20160806151343349", notify_url: "http://www.pay.com/notify_url.php",
+    return_url: "http://www.pay.com/return_url.php", name: "VIP会员", money: "1.00", param: " ", sign_type: "MD5" };
+  assert.equal(epay.signContent(request),
+    "money=1.00&name=VIP会员&notify_url=http://www.pay.com/notify_url.php&out_trade_no=20160806151343349&pid=1001&return_url=http://www.pay.com/return_url.php&type=alipay");
+  assert.equal(epay.sign(request, key), "427724b6656aa612cfdbe7a2262036a3");
+  const notify = { pid: "1001", trade_no: "2016080622555342651", out_trade_no: "20160806151343349", type: "alipay", name: "VIP会员",
+    money: "1", trade_status: "TRADE_SUCCESS", sign_type: "MD5" };
+  notify.sign = epay.sign(notify, key);
+  assert.equal(notify.sign, "88efc7e7a064a2921e200a02847b7a09");
+  assert.deepEqual(epay.parseNotify({ pid: "1001", key }, notify),
+    { orderId: "20160806151343349", tradeNo: "2016080622555342651", amountCents: 100, paid: true });
+  assert.equal(epay.parseNotify({ pid: "1001", key }, { ...notify, money: "100" }), null);
+  assert.deepEqual(["1", "1.5", "1.50", "0.01", "1.234", "-1", ""].map(epay.centsOf), [100, 150, 150, 1, NaN, NaN, NaN]);
+});
 
 const pair = () => crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
 const pem = (key, type) => key.export({ type, format: "pem" });
