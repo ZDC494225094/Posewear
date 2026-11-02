@@ -1,7 +1,7 @@
 import { db } from "../db.js";
 import { encryptSecret, decryptSecret, maskSecret } from "../lib/crypto.js";
 import { badRequest, notFound } from "../lib/errors.js";
-import { TIER_RANK, tierOfPixels } from "./sizes.js";
+import { TIER_RANK } from "./sizes.js";
 
 // A channel is one way to reach an image model: an API key plus base URL and
 // model id. Several channels give failover; the worker tries them by priority.
@@ -143,10 +143,14 @@ export function create(input) {
 export function update(id, input) {
   const existing = row(id);
   const c = validate(input, existing);
-  // Saving also clears what the size check learned, so a changed relay is checked again.
+  const key = keyFromInput(input, existing);
+  // What the size check learned is kept unless the endpoint, key, model or size
+  // mode changed (switching relays); renaming or pausing a channel keeps it.
+  const sameEndpoint = c.baseUrl === existing.base_url && key === existing.api_key_enc && c.model === existing.model
+    && c.options.sizeMode === hydrate(existing).options.sizeMode;
   db.prepare(`UPDATE channels SET name = ?, kind = ?, base_url = ?, api_key_enc = ?, model = ?, options = ?,
-    enabled = ?, priority = ?, size_limit = NULL, updated_at = ? WHERE id = ?`).run(c.name, c.kind, c.baseUrl,
-    keyFromInput(input, existing), c.model, JSON.stringify(c.options), c.enabled ? 1 : 0, c.priority, Date.now(), id);
+    enabled = ?, priority = ?, size_limit = ${sameEndpoint ? "size_limit" : "NULL"}, updated_at = ? WHERE id = ?`).run(c.name, c.kind,
+    c.baseUrl, key, c.model, JSON.stringify(c.options), c.enabled ? 1 : 0, c.priority, Date.now(), id);
   return adminDto(row(id));
 }
 
@@ -200,9 +204,11 @@ export function clearSizeLimit(id) {
   db.prepare("UPDATE channels SET size_limit = NULL WHERE id = ?").run(id);
 }
 
-// A channel answered `requested` with a smaller image: hold it to the tier it delivered.
-export function limitSizes(id, { pixels, requested, delivered }) {
-  const sizeLimit = { maxTier: tierOfPixels(pixels), requested, delivered, at: Date.now() };
-  db.prepare("UPDATE channels SET size_limit = ? WHERE id = ?").run(JSON.stringify(sizeLimit), id);
+// A channel answered `requested` with a smaller image: hold it to maxTier. A
+// result of a job sent before the channel was last saved is ignored, since the
+// channel may point somewhere else now.
+export function limitSizes(id, { maxTier, requested, delivered, since = Date.now() }) {
+  const sizeLimit = { maxTier, requested, delivered, at: Date.now() };
+  db.prepare("UPDATE channels SET size_limit = ? WHERE id = ? AND updated_at <= ?").run(JSON.stringify(sizeLimit), id, since);
   return sizeLimit;
 }

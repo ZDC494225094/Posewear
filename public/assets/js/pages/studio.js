@@ -499,7 +499,8 @@ export async function render(ctx) {
       h("section.panel-sec", sectionHead("ratio", "indigo", "画幅"),
         h("div.ratio-grid", { role: "radiogroup", "aria-label": "画幅" }, cfg.ratios.map((r) =>
           h("button.ratio-opt", { type: "button", role: "radio", "aria-checked": String(r === state.ratio), "aria-pressed": String(r === state.ratio),
-            onclick: () => { state.ratio = r; update(); } }, ratioShape(r), r)))),
+            onclick: () => { state.ratio = r; update(); } }, ratioShape(r), r))),
+        cfg.tiers.length > 1 ? null : tierNote()),
       cfg.tiers.length > 1 ? h("section.panel-sec", sectionHead("expand", "blue", "清晰度"),
         seg("清晰度", cfg.tiers.map((t) => ({ value: t.id, content: [t.label, t.multiplier !== 1 ? h("span.chip-note", `×${t.multiplier}`) : null] })),
           state.tier, (v) => { state.tier = v; update(); }),
@@ -586,7 +587,11 @@ export async function render(ctx) {
     const card = genCard(gen, {
       keep,
       onChange: (g) => { if (!g) { cards.delete(gen.id); showEmpty(); } },
-      onCreated: (g) => { if (!filter && !cards.has(g.id)) { addCard(g, { prepend: true }); canvas.scrollTo({ top: 0, behavior: "smooth" }); } }
+      onCreated: async (g) => {
+        if (filter === "favorite") { filter = ""; renderFeedTools(); await loadFeed(); }
+        if (!cards.has(g.id)) addCard(g, { prepend: true });
+        canvas.scrollTo({ top: 0, behavior: "smooth" });
+      }
     });
     cards.set(gen.id, card);
     if (prepend) feed.prepend(card.node); else feed.append(card.node);
@@ -625,6 +630,8 @@ export async function render(ctx) {
       if (["UPLOAD_GONE", "PERSON_IMAGE_GONE"].includes(err.code)) { state.person = null; state.outfitUpload = null; update(); }
       if (err.code === "INSUFFICIENT_CREDITS") { store.refreshUser(); }
       toastError(err);
+      // No channel delivers that size any more (it changed after the page loaded): redraw with the options left.
+      if (err.code === "TIER_UNSUPPORTED") store.refreshConfig().then(() => navigate(location.pathname + location.search, { replace: true }));
     }
   }
 

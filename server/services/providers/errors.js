@@ -16,6 +16,7 @@ export class ProviderError extends Error {
 
 export const PUBLIC_MESSAGES = {
   moderation: "内容未通过模型的安全审核，请调整描述或参考图后重试。本次点数已退回。",
+  moderationSexual: "模型的安全审核认为画面可能涉及裸露或色情，换一套更保守的服装、姿势或描述后再试。本次点数已退回。",
   rejected: "模型无法处理这次请求，请调整描述或参考图后重试。本次点数已退回。",
   busy: "生成服务暂时繁忙，请稍后重试。本次点数已退回。",
   network: "无法连接生成服务，请稍后重试或联系管理员。本次点数已退回。",
@@ -65,8 +66,12 @@ export function classifyHttpError(status, json, raw) {
   const haystack = `${code} ${message}`;
   const detail = JSON.stringify({ status, code, message, moderation: err.moderation_details || undefined }).slice(0, 2000);
 
-  if (/moderation_blocked|content_policy|safety system|safety_violation|moderation/i.test(haystack)) {
-    return new ProviderError("user", message, { status, code: "moderation_blocked", detail, publicMessage: PUBLIC_MESSAGES.moderation });
+  // Safety refusals. OpenAI names the categories in moderation_details; relays
+  // tend to say it in a message, often in Chinese ("违反了我们的内容政策").
+  if (/moderation_blocked|content_policy|safety system|safety_violation|moderation|内容政策|安全审核|防护限制/i.test(haystack)) {
+    const sexual = (err.moderation_details?.categories || []).includes("sexual") || /裸露|色情|情色|nudity|sexual/i.test(message);
+    return new ProviderError("user", message, { status, code: "moderation_blocked", detail,
+      publicMessage: sexual ? PUBLIC_MESSAGES.moderationSexual : PUBLIC_MESSAGES.moderation });
   }
   // Out of credit on this key or relay account: whatever the status code
   // (relays use 400, 402, 403 or 429 for this), switch to the next channel.

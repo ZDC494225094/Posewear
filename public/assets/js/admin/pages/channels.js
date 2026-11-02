@@ -25,7 +25,7 @@ function channelFields(kind, models) {
     { key: "model", label: "模型 ID", placeholder: "gpt-image-2",
       help: `常用：${models.map((m) => m.id).join("、")}。也可以填中转站自定义的模型名。` },
     { key: "options.sizeMode", label: "尺寸模式", type: "select", options: SIZE_MODES,
-      help: "2K、4K 作品、婚纱照和超分只发给「自定义尺寸」的渠道；固定三档和 auto 只接标准清晰度。中转返回的图比要求的小时，会自动标记这个渠道，并按实际清晰度给用户退差价。" },
+      help: "2K、4K 作品、婚纱照和超分只发给「自定义尺寸」的渠道；固定三档和 auto 只接标准清晰度。中转返回的图比要求的小时，会自动标记这个渠道；作品按实际清晰度收费并退回差价（婚纱照按套系计价，不退差价）。" },
     { key: "options.inputFidelity", label: "input_fidelity 参数", type: "select", options: FIDELITY },
     { key: "priority", label: "优先级", type: "number", help: "数字越大越先使用。失败时自动切到下一个渠道。" },
     { key: "options.maxConcurrency", label: "最大并发", type: "number", min: 0, max: 100, help: "0 表示不限制。用来避开账号的速率限制（每分钟图片数）。" },

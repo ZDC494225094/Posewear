@@ -7,7 +7,7 @@ const FONT_STACK = "'Microsoft YaHei','PingFang SC','Noto Sans CJK SC','Source H
 
 // Visible "AI生成" label (explicit AIGC marking): a translucent pill in a corner,
 // sized relative to the image so it stays legible on 4K output.
-export function watermarkSvg(width, height, { text, position, opacity }) {
+export function watermarkBox(width, height, { text, position }) {
   const fontSize = Math.max(14, Math.round(Math.min(width, height) * 0.026));
   const padX = Math.round(fontSize * 0.7);
   const padY = Math.round(fontSize * 0.42);
@@ -18,6 +18,11 @@ export function watermarkSvg(width, height, { text, position, opacity }) {
   const margin = Math.round(Math.min(width, height) * 0.025);
   const x = position.endsWith("left") ? margin : width - margin - boxW;
   const y = position.startsWith("top") ? margin : height - margin - boxH;
+  return { x, y, boxW, boxH, fontSize };
+}
+
+export function watermarkSvg(width, height, { text, position, opacity }) {
+  const { x, y, boxW, boxH, fontSize } = watermarkBox(width, height, { text, position });
   return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
     <g opacity="${opacity}">
       <rect x="${x}" y="${y}" width="${boxW}" height="${boxH}" rx="${Math.round(boxH / 2)}" fill="#0d1f19" fill-opacity="0.55"/>
@@ -47,6 +52,24 @@ function xmpPacket(label) {
 <x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
 <rdf:Description rdf:about="" xmlns:AIGC="http://www.tc260.org.cn/ns/AIGC/1.0/"><AIGC:AIGC>${escapeXml(label)}</AIGC:AIGC></rdf:Description>
 </rdf:RDF></x:xmpmeta><?xpacket end="w"?>`;
+}
+
+// A saved work for 超分: its "AI生成" label covered with the softened strip of
+// picture next to it, so the model doesn't redraw the label (the result gets
+// its own). Unchanged when the label is off.
+export async function withoutWatermark(file) {
+  const wm = settings.get("safety").watermark;
+  if (!wm.enabled) return file;
+  const meta = await sharp(file, { limitInputPixels: 80_000_000 }).metadata();
+  const box = watermarkBox(meta.width, meta.height, wm);
+  const pad = Math.round(box.boxH * 0.3);
+  const left = Math.max(0, box.x - pad), top = Math.max(0, box.y - pad);
+  const width = Math.min(meta.width - left, box.boxW + pad * 2), height = Math.min(meta.height - top, box.boxH + pad * 2);
+  const from = wm.position.startsWith("top") ? top + height : top - height;
+  if (width < 1 || height < 1 || from < 0 || from + height > meta.height) return file;
+  const patch = await sharp(file, { limitInputPixels: 80_000_000 }).extract({ left, top: from, width, height })
+    .blur(Math.max(1, height / 5)).png().toBuffer();
+  return sharp(file, { limitInputPixels: 80_000_000 }).composite([{ input: patch, left, top }]).png().toBuffer();
 }
 
 // Apply watermark + metadata, encode in the configured format, make a thumbnail.

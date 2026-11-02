@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { config } from "./config.js";
 import { seedCategories, addMinors, addMajor, seedWeddingScenes, OUTFIT_TREE, UPSTREAM_OUTFIT_SERIES, MORE_PROFESSIONS,
   WEDDING_OUTFIT_TREES, WEDDING_PLATE_TREE } from "./services/taxonomy-seed.js";
+import { outputTokens } from "./services/sizes.js";
 
 export const db = new Database(config.dbFile);
 db.pragma("journal_mode = WAL");
@@ -604,7 +605,29 @@ const migrations = [
   // requested, delivered, at). Saving the channel in the admin clears it.
   `
   ALTER TABLE channels ADD COLUMN size_limit TEXT;
-  `
+  `,
+  // 9: re-estimate the model cost of finished jobs whose channel sent no token
+  // usage. Before 1.6.0 the estimate scaled the 1024×1024 price by area, which
+  // overstated 1024×1536 about 2× and 2K about 3×; now it counts gpt-image-2's
+  // output tokens for the size actually delivered. gpt-image-1.x jobs keep theirs.
+  (conn) => {
+    let price = 30;
+    try {
+      const stored = conn.prepare("SELECT value FROM settings WHERE key = 'generation'").get();
+      price = Number(JSON.parse(stored?.value || "{}").tokenPriceUsd?.imageOutput) || 30;
+    } catch { /* default price */ }
+    const rows = conn.prepare(`SELECT g.id, g.size, g.quality, g.n, g.model,
+        (SELECT i.width || 'x' || i.height FROM generation_images i WHERE i.generation_id = g.id ORDER BY i.idx LIMIT 1) AS delivered,
+        (SELECT COUNT(*) FROM generation_images i WHERE i.generation_id = g.id) AS images
+      FROM generations g WHERE g.status = 'succeeded' AND g.usage IS NULL AND g.api_cost_usd IS NOT NULL`).all();
+    const update = conn.prepare("UPDATE generations SET api_cost_usd = ? WHERE id = ?");
+    for (const r of rows) {
+      if (/^gpt-image-1/.test(r.model || "")) continue;
+      const m = /^(\d+)x(\d+)$/.exec(r.delivered || r.size || "");
+      if (!m) continue;
+      update.run((outputTokens(Number(m[1]), Number(m[2]), r.quality) * price / 1e6) * (r.images || r.n || 1), r.id);
+    }
+  }
 ];
 
 export function migrate() {

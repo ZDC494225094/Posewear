@@ -16,7 +16,15 @@ export const SIZE_TABLE = {
 
 export const EXPERIMENTAL_PIXELS = 2560 * 1440;
 
+export const TIERS = ["standard", "hd", "uhd"];
 export const TIER_RANK = { standard: 0, hd: 1, uhd: 2 };
+
+// The tier a job asking for `tier` really got: what its pixels pass for at its
+// ratio, and in any case below the tier it fell short of.
+export function deliveredTier(pixels, ratio, tier) {
+  const reached = tierOfPixels(pixels, ratio);
+  return TIER_RANK[reached] < TIER_RANK[tier] ? reached : TIERS[Math.max(0, TIER_RANK[tier] - 1)];
+}
 
 // The highest tier an image of this many pixels passes for: at least 80% of
 // that tier's size for the ratio (or, without a ratio, of its smallest size).
@@ -33,6 +41,21 @@ export function dims(size) {
 }
 
 export const isExperimental = (size) => { const d = dims(size); return !!d && d[0] * d[1] > EXPERIMENTAL_PIXELS; };
+
+// Output tokens of one gpt-image-2 image. OpenAI lists per-image prices only
+// for the 1024 sizes and offers a calculator for the rest; this formula, worked
+// out from that calculator, gives the same numbers: 1024×1024 medium 1,756
+// tokens ($0.053), 1024×1536 medium 1,372 ($0.041), 3840×2160 high 13,342
+// ($0.40). Cost follows the short side's share of a grid more than the pixel
+// count, so 2K costs about 1.5× and 4K about 3× a standard image, not 2–5×.
+const QUALITY_GRID = { low: 16, medium: 48, high: 96 };
+
+export function outputTokens(width, height, quality) {
+  const q = QUALITY_GRID[quality] ?? QUALITY_GRID.medium;
+  const long = Math.max(width, height), short = Math.min(width, height);
+  const band = Math.floor((2 * q * short + long) / (2 * long));
+  return Math.ceil((q * band * (width * height + 2_000_000)) / 4_000_000);
+}
 
 export function flexibleSize(ratio, tier) {
   const [w, h] = SIZE_TABLE[ratio]?.[tier] || SIZE_TABLE["1:1"].standard;

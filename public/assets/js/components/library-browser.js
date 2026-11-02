@@ -89,17 +89,19 @@ export function libraryBrowser({ type = "pose", mode = "page", withPerson = fals
   const node = h("div.lib-browser", { class: `mode-${mode}` }, filterBar, sheet, lockNote, summary, grid, h("div.lib-more-wrap", more));
 
   let searchTimer = null;
+  const queueSearch = (q) => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => setFilter({ q }, { reload: true, redraw: false }), 280);
+  };
+  // While an input method is composing (pinyin), wait until the text is committed.
   const searchInput = h("input.input", { type: "search",
-    oninput: (e) => {
-      clearTimeout(searchTimer);
-      const q = e.target.value;
-      searchTimer = setTimeout(() => setFilter({ q }, { reload: true }), 280);
-    } });
+    oninput: (e) => { if (!e.isComposing) queueSearch(e.target.value); },
+    oncompositionend: (e) => queueSearch(e.target.value) });
   const search = h("label.lib-search", icon("search", 17), h("span.sr-only", "搜索"), searchInput);
-  function setFilter(patch, { reload = true } = {}) {
+  function setFilter(patch, { reload = true, redraw = true } = {}) {
     Object.assign(state.filters, patch);
     onFiltersChange?.({ type: state.type, ...state.filters });
-    renderFilters();
+    if (redraw) renderFilters();
     if (reload) load(true);
   }
 

@@ -17,6 +17,12 @@ export const store = {
     emit();
     return state.user;
   },
+  // Reload the public config, e.g. after the server says an option went away.
+  async refreshConfig() {
+    try { state.config = await api.get("/api/public/config"); } catch { /* keep current */ }
+    emit();
+    return state.config;
+  },
   async init() {
     const [config, me] = await Promise.all([api.get("/api/public/config"), api.get("/api/me").catch(() => ({ user: null }))]);
     state.config = config;

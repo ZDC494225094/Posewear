@@ -2,7 +2,7 @@
 // links and limits that keep the library from being scraped.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { startApp, client } from "./helpers.js";
+import { startApp, client, listenLocal } from "./helpers.js";
 import { createFakeOpenAI } from "../scripts/fake-openai.js";
 
 let app, fake, admin, viewer, payer, guest;
@@ -17,7 +17,7 @@ const unlocked = async (c) => (await c.get("/api/me")).data.user.libraryUnlocked
 
 before(async () => {
   fake = createFakeOpenAI();
-  await new Promise((r) => fake.server.listen(0, "127.0.0.1", r));
+  await listenLocal(fake.server);
   const fakeBase = `http://127.0.0.1:${fake.server.address().port}/v1`;
   app = await startApp();
   admin = client(app.base);

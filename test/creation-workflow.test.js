@@ -1,7 +1,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import sharp from "sharp";
-import { startApp, client, waitFor } from "./helpers.js";
+import { startApp, client, waitFor, listenLocal } from "./helpers.js";
 import { createFakeOpenAI } from "../scripts/fake-openai.js";
 
 let app, fake, admin, owner, other, tree, image, virtual, scene, item;
@@ -12,7 +12,7 @@ const ok = (response, status = 200) => {
 
 before(async () => {
   fake = createFakeOpenAI();
-  await new Promise((resolve) => fake.server.listen(0, "127.0.0.1", resolve));
+  await listenLocal(fake.server);
   app = await startApp();
   admin = client(app.base); owner = client(app.base); other = client(app.base);
   for (const c of [admin, owner, other]) await c.get("/api/public/config");

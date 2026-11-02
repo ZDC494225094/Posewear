@@ -61,7 +61,8 @@ export async function render(ctx) {
     try {
       const data = await api.get("/api/generations", { status, page, size });
       total = data.total;
-      for (const gen of data.items) addCard(gen);
+      // A work added on this page (超分) shifts the pages by one: skip what is already shown.
+      for (const gen of data.items) if (!cards.has(gen.id)) addCard(gen);
       summary.textContent = `共 ${total} 个作品`;
       more.hidden = cards.size >= total;
       if (!total) showEmpty();

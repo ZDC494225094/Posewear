@@ -2,14 +2,14 @@
 // and the model-cost estimate when a relay returns no token usage.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { startApp, client, waitFor } from "./helpers.js";
+import { startApp, client, waitFor, listenLocal } from "./helpers.js";
 import { createFakeOpenAI } from "../scripts/fake-openai.js";
 
 let app, fake, admin, user, flexibleId, fixedId;
 
 before(async () => {
   fake = createFakeOpenAI();
-  await new Promise((r) => fake.server.listen(0, "127.0.0.1", r));
+  await listenLocal(fake.server);
   const fakeBase = `http://127.0.0.1:${fake.server.address().port}/v1`;
   app = await startApp();
   admin = client(app.base);
@@ -138,11 +138,50 @@ test("a relay that answers 2K with a small image: the work is charged as standar
   assert.equal(again.status, 503);
   assert.equal(again.data.error.code, "TIER_UNSUPPORTED");
 
-  // Saving the channel (say, after switching relays) checks it again.
-  await admin.put(`/api/admin/channels/${flexibleId}`, { name: "OpenAI 官方 · gpt-image-2" });
-  assert.equal((await admin.get("/api/admin/channels")).data.items.find((c) => c.id === flexibleId).sizeLimit, null);
+  // Renaming or pausing keeps what was learned; pointing it elsewhere (model, URL, key) checks it again.
+  const limitOf = async () => (await admin.get("/api/admin/channels")).data.items.find((c) => c.id === flexibleId).sizeLimit;
+  await admin.put(`/api/admin/channels/${flexibleId}`, { name: "改个名字" });
+  assert.equal((await limitOf())?.maxTier, "standard");
+  await admin.put(`/api/admin/channels/${flexibleId}`, { model: "gpt-image-2.5-sunburst" });
+  assert.equal(await limitOf(), null);
+  await admin.put(`/api/admin/channels/${flexibleId}`, { name: "OpenAI 官方 · gpt-image-2", model: "gpt-image-2" });
   assert.deepEqual((await user.get("/api/public/config")).data.generation.tiers.map((t) => t.id), ["standard", "hd"]);
   assert.equal((await user.get("/api/wedding/catalog")).data.packages[0].photoText, "2K 高清原图");
+});
+
+test("a relay that caps the long edge at 2048 is held below 2K, judged by the job's ratio", async () => {
+  const res = await user.post("/api/generations", { prompt: "a red coat [fake:cap2048]", quality: "medium", ratio: "2:3", tier: "hd" });
+  assert.equal(res.status, 201, JSON.stringify(res.data));
+  const done = await finished(res.data.generation.id);
+  // 1536×2304 asked, 1365×2048 delivered: 2.80 M pixels, under 80% of 2:3's 2K.
+  assert.equal(`${done.images[0].width}x${done.images[0].height}`, "1365x2048");
+  assert.equal(done.tier, "standard");
+  assert.equal(done.refunded, 4);
+  const channel = (await admin.get("/api/admin/channels")).data.items.find((c) => c.id === flexibleId);
+  assert.equal(channel.maxTier, "standard", "2.80 M pixels would pass for 3:4's 2K, but this ratio didn't get it");
+  await admin.put(`/api/admin/channels/${flexibleId}`, { model: "gpt-image-2.5-flare" });
+  await admin.put(`/api/admin/channels/${flexibleId}`, { model: "gpt-image-2" });
+});
+
+test("2K works queued behind one that showed the channel can't do 2K fail with a clear refund", async () => {
+  await admin.put("/api/admin/settings/generation", { value: { workerConcurrency: 1 } });
+  try {
+    const before = await balance(user);
+    const first = await user.post("/api/generations", { prompt: "a red coat [fake:1k] [fake:slow]", quality: "medium", ratio: "1:1", tier: "hd" });
+    const second = await user.post("/api/generations", { prompt: "a blue coat", quality: "medium", ratio: "1:1", tier: "hd" });
+    assert.equal(second.status, 201, JSON.stringify(second.data));
+    assert.equal((await finished(first.data.generation.id)).tier, "standard");
+    const failed = await finished(second.data.generation.id);
+    assert.equal(failed.status, "failed");
+    assert.equal(failed.errorCode, "TIER_UNSUPPORTED");
+    assert.match(failed.errorMessage, /出不了 2K 的尺寸，本次点数已退回/);
+    assert.equal(failed.refunded, 10);
+    assert.equal(await balance(user), before - 6, "the first is charged as standard, the second not at all");
+  } finally {
+    await admin.put("/api/admin/settings/generation", { value: { workerConcurrency: 2 } });
+    await admin.put(`/api/admin/channels/${flexibleId}`, { model: "gpt-image-2.5-flare" });
+    await admin.put(`/api/admin/channels/${flexibleId}`, { model: "gpt-image-2" });
+  }
 });
 
 test("the admin size check asks for 4K and records what the channel returns", async () => {

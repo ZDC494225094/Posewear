@@ -1,14 +1,14 @@
 // Batch asset creation (素材创作) and the studio's camera presets and realism switch.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { startApp, client, waitFor } from "./helpers.js";
+import { startApp, client, waitFor, listenLocal } from "./helpers.js";
 import { createFakeOpenAI } from "../scripts/fake-openai.js";
 
 let app, fake, admin, user, taxonomy;
 
 before(async () => {
   fake = createFakeOpenAI();
-  await new Promise((r) => fake.server.listen(0, "127.0.0.1", r));
+  await listenLocal(fake.server);
   const fakeBase = `http://127.0.0.1:${fake.server.address().port}/v1`;
   app = await startApp();
   admin = client(app.base);

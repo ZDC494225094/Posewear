@@ -146,7 +146,7 @@ router.post("/admin/channels/:id/test", async (req, res) => {
       const delivered = `${meta.width}x${meta.height}`;
       const tier = tierOfPixels(meta.width * meta.height, "2:3");
       if (tier === "uhd") channels.clearSizeLimit(channel.id);
-      else channels.limitSizes(channel.id, { pixels: meta.width * meta.height, requested: size, delivered });
+      else channels.limitSizes(channel.id, { maxTier: tier, requested: size, delivered });
       audit(req, "channel.size_check", "channel", channel.id, { requested: size, delivered });
       return res.json({ ok: tier !== "standard", ms: Date.now() - started, tier,
         message: tier === "uhd" ? `能出 4K：要 ${size.replace("x", "×")}，返回了 ${delivered.replace("x", "×")}。`

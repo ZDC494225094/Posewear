@@ -69,7 +69,8 @@ function bento(counts, cfg) {
       h("p", "用本人或已授权的照片、审核通过的虚拟人，或自己作品里的人物，成片保留五官和发型。")),
     h("article.bento-card",
       tile("expand", "blue", "lg"),
-      h("h3", "最高 2K 高清"),
+      // The highest tier offered right now (none above standard while no channel delivers 2K).
+      h("h3", { uhd: "最高 4K 超清", hd: "最高 2K 高清" }[cfg.generation.tiers.at(-1)?.id] || "多种画幅"),
       h("p", `支持 ${cfg.generation.ratios.length} 种画幅，竖版、方图、横版随意切换。`)),
     h("article.bento-card",
       tile("redo", "teal", "lg"),
@@ -128,12 +129,15 @@ export function packagePerks(pkg, cfg) {
 function faq(cfg) {
   const q = cfg.generation.qualities;
   const cost = q.map((x) => `${x.label} ${x.credits} 点`).join("、");
+  const tiers = cfg.generation.tiers;
+  const higher = tiers.filter((t) => t.id !== "standard");
+  const size = (tier) => cfg.generation.sizes?.["2:3"]?.[tier]?.replace("x", " × ");
   const items = [
-    ["生成一张要多少点数？", `按画质计费：${cost}；选 2K 等更高清晰度时按倍率增加。生成前按钮上会显示本次消耗。`],
+    ["生成一张要多少点数？", `按画质计费：${cost}${higher.length ? `；选${higher.map((t) => t.label).join("、")}时按倍率增加` : ""}。生成前按钮上会显示本次消耗。`],
     ["生成失败会扣点数吗？", "不会。被安全审核拦截、模型繁忙或任何原因失败，扣除的点数都会自动退回。"],
     ["人物照片安全吗？", `照片只用于你发起的任务，${cfg.generation.personRetentionDays} 天后自动删除。用了真人照片的作品只有你自己能看到，不能公开发布；审核通过的虚拟人形象不受这个限制。`],
     ["生成的图片可以商用吗？", "可以用于个人或商业用途，但需自行确保不侵犯他人肖像权、著作权等权益，并保留图片上的“AI生成”标识。"],
-    ["支持哪些尺寸？", "支持 2:3、3:4、1:1、9:16、16:9 等常用画幅，标准和 2K 高清两档清晰度。"]
+    ["支持哪些尺寸？", `支持 ${cfg.generation.ratios.join("、")} 画幅；清晰度有${tiers.map((t) => `「${t.label}」${size(t.id) ? `（2:3 为 ${size(t.id)}）` : ""}`).join("、")}。`]
   ];
   return h("section.section.wrap", { "aria-labelledby": "home-faq" },
     h("div.section-head", h("h2#home-faq", "常见问题")),

@@ -33,6 +33,7 @@ export function modal({ title, content, footer, wide = false, onClose, label } =
   backdrop.addEventListener("mousedown", (e) => { if (e.target === backdrop) close(); });
   const onKey = (e) => {
     if (menuOpen() || zoomOpen) return; // an open drop-down or zoom view handles its own keys
+    if (e.isComposing) return; // Esc or Enter here belongs to the input method (pinyin), not the dialog
     if (e.key === "Escape") { e.stopPropagation(); close(); }
     if (e.key === "Tab") {
       const focusables = [...dialog.querySelectorAll("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])")]
@@ -212,6 +213,7 @@ export function zoomImage(src, { alt = "" } = {}) {
   stage.addEventListener("pointercancel", release);
 
   const onKey = (e) => {
+    if (e.isComposing) return;
     if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); }
     else if (e.key === "+" || e.key === "=") zoomBy(1.25);
     else if (e.key === "-" || e.key === "_") zoomBy(1 / 1.25);

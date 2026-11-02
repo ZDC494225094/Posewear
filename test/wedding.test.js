@@ -3,14 +3,14 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import sharp from "sharp";
-import { startApp, client, waitFor } from "./helpers.js";
+import { startApp, client, waitFor, listenLocal } from "./helpers.js";
 import { createFakeOpenAI } from "../scripts/fake-openai.js";
 
 let app, fake, admin, user, other, catalog;
 
 before(async () => {
   fake = createFakeOpenAI();
-  await new Promise((r) => fake.server.listen(0, "127.0.0.1", r));
+  await listenLocal(fake.server);
   const fakeBase = `http://127.0.0.1:${fake.server.address().port}/v1`;
   app = await startApp();
   admin = client(app.base);
@@ -221,6 +221,34 @@ test("admins manage scenes: sample photos with a virtual couple are public while
   assert.ok(run.data.plates >= 12 && run.data.outfits === 16, JSON.stringify(run.data));
   const again = (await admin.get("/api/admin/wedding/seed")).data;
   assert.deepEqual([again.plates, again.samples, again.outfits], [0, 0, 0], "queued work is not planned twice");
+});
+
+test("when the channel turns out not to deliver 2K, the rest of the album is made at standard", async () => {
+  const { data: settingsData } = await admin.get("/api/admin/settings/wedding");
+  const value = settingsData.value;
+  const shots = value.shots.map((s, i) => (i === 0 ? { ...s, prompt: `${s.prompt} [fake:1k]` } : s));
+  await admin.put("/api/admin/settings/wedding", { value: { ...value, shots } });
+  await admin.put("/api/admin/settings/generation", { value: { workerConcurrency: 1 } });
+  try {
+    const bride = await upload(user, 182);
+    const groom = await upload(user, 142);
+    const scene = catalog.scenes.find((s) => s.key === "white-studio");
+    const res = await user.post("/api/wedding/shoots", { packageKey: "light", consent: true, brideUploadIds: [bride.upload.id],
+      groomUploadIds: [groom.upload.id], looks: [lookFor(scene)] });
+    assert.equal(res.status, 201, JSON.stringify(res.data));
+    const done = await waitAlbum(user, res.data.shoot.id);
+    assert.equal(done.status, "done", JSON.stringify(done.items.map((it) => it.status)));
+    assert.equal(done.progress.done, 6);
+    // Every photo after the one that came back small was asked for at a standard size.
+    const calls = fake.requests.slice(-6);
+    const small = calls.findIndex((r) => r.fields.prompt.includes("[fake:1k]"));
+    assert.ok(small >= 0);
+    const standard = ["1024x1536", "1536x1024", "1152x1536", "1536x1152", "1024x1024", "864x1536", "1536x864"];
+    assert.ok(calls.slice(small + 1).every((r) => standard.includes(r.fields.size)), JSON.stringify(calls.map((r) => r.fields.size)));
+  } finally {
+    await admin.put("/api/admin/settings/wedding", { value });
+    await admin.put("/api/admin/settings/generation", { value: { workerConcurrency: 2 } });
+  }
 });
 
 test("deleting an album removes its photos and the couple's uploads", async () => {

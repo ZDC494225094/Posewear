@@ -3,14 +3,14 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import sharp from "sharp";
-import { startApp, client, waitFor } from "./helpers.js";
+import { startApp, client, waitFor, listenLocal } from "./helpers.js";
 import { createFakeOpenAI } from "../scripts/fake-openai.js";
 
 let app, fake, admin, alice, bob, stranger;
 
 before(async () => {
   fake = createFakeOpenAI();
-  await new Promise((r) => fake.server.listen(0, "127.0.0.1", r));
+  await listenLocal(fake.server);
   const fakeBase = `http://127.0.0.1:${fake.server.address().port}/v1`;
   app = await startApp();
   admin = client(app.base);
@@ -244,7 +244,8 @@ test("a refused asset job mentions the refund only to users who paid", async () 
   assert.equal(free.status, 201, JSON.stringify(free.data));
   const adminJob = await pollJob(admin, "/api/admin", free.data.items[0].id);
   assert.equal(adminJob.status, "failed");
-  assert.equal(adminJob.errorMessage, "内容未通过模型的安全审核，请调整描述或参考图后重试。");
+  // The fake API flags the "sexual" category, so the message says what to change; free jobs say nothing about refunds.
+  assert.equal(adminJob.errorMessage, "模型的安全审核认为画面可能涉及裸露或色情，换一套更保守的服装、姿势或描述后再试。");
 
   const before = await balance(alice);
   const paid = await alice.post("/api/my/asset-jobs", { type: "outfit", categoryId: tang.id, description: "[fake:moderation]" });

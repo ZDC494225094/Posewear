@@ -13,9 +13,9 @@ import * as fees from "./asset-fees.js";
 import { InputError } from "./asset-jobs.js";
 import { providerFor, ProviderError, PUBLIC_MESSAGES } from "./providers/index.js";
 import { summarizeFailures } from "./providers/errors.js";
-import { finalizeImage } from "./image-post.js";
+import { finalizeImage, withoutWatermark } from "./image-post.js";
 import { apiCostUsd } from "./pricing.js";
-import { sizeForChannel, dims, tierOfPixels } from "./sizes.js";
+import { sizeForChannel, flexibleSize, dims, deliveredTier, TIERS, TIER_RANK } from "./sizes.js";
 import { genRoot, imageFile } from "./generations.js";
 import { randomId, sha256 } from "../lib/crypto.js";
 import { config } from "../config.js";
@@ -124,11 +124,13 @@ async function prepare(file, { lineArt, maxEdge }) {
 async function loadInputs(job) {
   const maxEdge = settings.get("generation").inputMaxEdge;
   const images = [];
-  // 超分 sends only the image being redrawn, at up to 2048 px so the model sees its detail.
+  // 超分 sends only the image being redrawn, without its "AI生成" label, at up
+  // to 2048 px so the model sees its detail.
   if (job.upscale_of) {
     const row = db.prepare("SELECT path FROM generation_images WHERE id = ?").get(job.upscale_of);
     if (!row || !fs.existsSync(imageFile(row.path))) throw new InputError("要超分的图片已被删除");
-    return [{ ...(await prepare(imageFile(row.path), { lineArt: false, maxEdge: Math.max(maxEdge, 2048) })), name: "image.jpg" }];
+    const source = await withoutWatermark(imageFile(row.path));
+    return [{ ...(await prepare(source, { lineArt: false, maxEdge: Math.max(maxEdge, 2048) })), name: "image.jpg" }];
   }
   if (job.kind === "asset" || job.shoot_id) {
     const inputs = job.kind === "asset" ? assetJobs.inputFiles(job) : wedding.inputFiles(job);
@@ -276,7 +278,7 @@ function recordResults(job, stored, channel, size, result, cost, short) {
 function chargeAsDelivered(job, stored) {
   const gen = settings.get("generation");
   const { width, height } = stored[0].final;
-  const tier = tierOfPixels(width * height, job.ratio);
+  const tier = deliveredTier(width * height, job.ratio, job.tier);
   const quality = gen.qualities.find((q) => q.id === job.quality);
   const multiplier = gen.tiers.find((t) => t.id === tier)?.multiplier ?? 1;
   const paid = Math.floor((job.cost_credits - job.asset_fee) / job.n);
@@ -302,9 +304,42 @@ async function imageDims(image) {
 
 // ---------- main
 
+const TIER_TEXT = { hd: "2K", uhd: "4K" };
+const hasRoom = (c) => !c.options.maxConcurrency || (channelActive.get(c.id) || 0) < c.options.maxConcurrency;
+
 // onPrepared: called once the inputs are ready and the job is about to use a channel.
 async function runJob(job, onPrepared = () => {}) {
   const gen = settings.get("generation");
+  // Works and wedding photos at 2K or 4K, and 超分, go only to channels that
+  // deliver that size; a fixed-size one would answer with a 1024-class image.
+  // Asset jobs are resized to their spec, so any channel will do.
+  const usable = channels.enabledChannels().filter((c) => c.kind === "mock" || c.apiKey);
+  if (job.kind === "work" && job.tier !== "standard" && usable.length && !usable.some((c) => channels.serves(c, job.tier))) {
+    // No channel delivers that size any more (one fell short since the job was queued).
+    const lower = TIERS.slice(0, TIER_RANK[job.tier]).reverse().find((t) => usable.some((c) => channels.serves(c, t)));
+    if (job.shoot_id && lower) {
+      // A wedding album is finished at the largest size still delivered rather than left with gaps.
+      job = { ...job, tier: lower, size: flexibleSize(job.ratio, lower) };
+      db.prepare("UPDATE generations SET tier = ?, size = ? WHERE id = ?").run(job.tier, job.size, job.id);
+    } else {
+      fail(job, { code: "TIER_UNSUPPORTED", detail: `No enabled channel delivers ${job.tier}`,
+        publicMessage: `生成渠道现在出不了 ${TIER_TEXT[job.tier]} 的尺寸，本次点数已退回，可以换成更低的清晰度再试。` });
+      return;
+    }
+  }
+  const needs = job.kind === "work" ? job.tier : "standard";
+  const candidates = usable.filter((c) => channels.serves(c, needs));
+  if (!candidates.length) {
+    fail(job, { code: "NO_CHANNEL", publicMessage: PUBLIC_MESSAGES.unavailable, detail: "No enabled channel with an API key" });
+    return;
+  }
+  // Every channel that could take it is at its cap: wait without preparing the
+  // inputs or using up an attempt.
+  if (!candidates.some(hasRoom)) {
+    onPrepared();
+    requeue(job, 3000, { countAttempt: false });
+    return;
+  }
   let inputs;
   try {
     inputs = await loadInputs(job);
@@ -313,17 +348,7 @@ async function runJob(job, onPrepared = () => {}) {
     fail(job, { code: "INPUT_UNAVAILABLE", publicMessage: message, detail: err.stack || err.message });
     return;
   }
-
-  // Works and wedding photos at 2K or 4K, and 超分, go only to channels that
-  // deliver that size; a fixed-size one would answer with a 1024-class image.
-  // Asset jobs are resized to their spec, so any channel will do.
-  const needs = job.kind === "work" ? job.tier : "standard";
-  const candidates = channels.enabledChannels().filter((c) => (c.kind === "mock" || c.apiKey) && channels.serves(c, needs));
-  if (!candidates.length) {
-    fail(job, { code: "NO_CHANNEL", publicMessage: PUBLIC_MESSAGES.unavailable, detail: "No enabled channel with an API key" });
-    return;
-  }
-  const free = candidates.filter((c) => !c.options.maxConcurrency || (channelActive.get(c.id) || 0) < c.options.maxConcurrency);
+  const free = candidates.filter(hasRoom);
   onPrepared();
   if (!free.length) {
     // Every channel is at its concurrency cap; wait without using up an attempt.
@@ -374,7 +399,8 @@ async function runJob(job, onPrepared = () => {}) {
     const wanted = dims(size);
     const short = job.tier !== "standard" && !!got && !!wanted && got[0] * got[1] < wanted[0] * wanted[1] * 0.8;
     if (short) {
-      channels.limitSizes(channel.id, { pixels: got[0] * got[1], requested: size, delivered });
+      channels.limitSizes(channel.id, { maxTier: deliveredTier(got[0] * got[1], job.ratio, job.tier),
+        requested: size, delivered, since: job.started_at });
       log.warn(`Generation ${job.id}: channel #${channel.id} answered ${size} with ${delivered}`);
       if (job.upscale_of) {
         fail(job, { code: "UPSCALE_TOO_SMALL", publicMessage: "生成渠道没有返回更高分辨率的图片，本次点数已退回。",

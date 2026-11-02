@@ -3,15 +3,16 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { startApp, client, waitFor } from "./helpers.js";
+import sharp from "sharp";
+import { startApp, client, waitFor, listenLocal } from "./helpers.js";
 import { createFakeOpenAI } from "../scripts/fake-openai.js";
 
 let app, fake, admin, user, other;
 const openaiChannels = [];
 
 before(async () => {
-  fake = createFakeOpenAI();
-  await new Promise((r) => fake.server.listen(0, "127.0.0.1", r));
+  fake = createFakeOpenAI({ keepBodies: true });
+  await listenLocal(fake.server);
   const fakeBase = `http://127.0.0.1:${fake.server.address().port}/v1`;
   app = await startApp();
   admin = client(app.base);
@@ -93,6 +94,22 @@ test("an image is redrawn at 4K as a new work that keeps the source's references
   assert.equal(again.status, 400);
   assert.equal(again.data.error.code, "ALREADY_LARGE");
   assert.equal(await balance(user), before - 17);
+});
+
+test("the image goes to the model without its AI生成 label", async () => {
+  const source = await makeWork(user);
+  const [image] = source.images;
+  const res = await user.post(`/api/generations/${source.id}/upscale`, { imageId: image.id, target: "hd" });
+  assert.equal(res.status, 201, JSON.stringify(res.data));
+  assert.equal((await finished(user, res.data.generation.id)).status, "succeeded");
+  // The fake API draws a flat (200, 120, 90) picture; the label is a dark pill
+  // in the bottom-right corner (872–998 × 1461–1510 on a 1024×1536 image).
+  // (stats() reads the whole input, so cut the corner out first.)
+  const red = async (input) => (await sharp(await sharp(input).extract({ left: 872, top: 1461, width: 126, height: 49 }).toBuffer()).stats()).channels[0].mean;
+  const saved = Buffer.from(await (await user.raw(image.url)).arrayBuffer());
+  assert.ok(await red(saved) < 185, "the saved work carries the label");
+  const sent = fake.requests.at(-1).files[0].body;
+  assert.ok(Math.abs((await red(sent)) - 200) < 6, "what the model gets doesn't");
 });
 
 test("only the owner can upscale, and only images of that work", async () => {

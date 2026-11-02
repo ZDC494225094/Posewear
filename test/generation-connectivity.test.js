@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import net from "node:net";
-import { startApp, client, waitFor } from "./helpers.js";
+import { startApp, client, waitFor, listenLocal } from "./helpers.js";
 import { classifyHttpError, classifyTransportError, summarizeFailures, PUBLIC_MESSAGES } from "../server/services/providers/errors.js";
 import { requestOptions } from "../server/services/providers/transport.js";
 
@@ -49,7 +49,7 @@ test("the configured connection deadline applies to a stalled TLS handshake", as
     socket.on("close", () => sockets.delete(socket));
     socket.on("error", () => {});
   });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await listenLocal(server);
   t.after(async () => {
     for (const socket of sockets) socket.destroy();
     await new Promise((resolve) => server.close(resolve));
@@ -64,7 +64,7 @@ test("the configured connection deadline applies to a stalled TLS handshake", as
 
 test("the full request deadline still bounds response reading", async (t) => {
   const server = http.createServer((req, res) => { res.writeHead(200); res.write("partial body"); });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await listenLocal(server);
   t.after(async () => {
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
@@ -90,7 +90,7 @@ test("a real worker retries a broken response, reports a network error and refun
     res.write('{"data":');
     setTimeout(() => res.destroy(), 30);
   });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await listenLocal(server);
   let app;
   t.after(async () => {
     await app?.stop();
@@ -145,7 +145,7 @@ test("a real worker retries a broken response, reports a network error and refun
       socket.on("close", () => sockets.delete(socket));
       socket.on("error", () => {});
     });
-    await new Promise((resolve) => stalled.listen(0, "127.0.0.1", resolve));
+    await listenLocal(stalled);
     t.after(async () => {
       for (const socket of sockets) socket.destroy();
       await new Promise((resolve) => stalled.close(resolve));
@@ -173,4 +173,19 @@ test("a real worker retries a broken response, reports a network error and refun
     assert.equal(ping.data.ok, false);
     assert.equal(ping.data.code, "CONNECT_TIMEOUT");
   });
+});
+
+test("safety refusals from relays, often in Chinese, count as moderation and name nudity when that was the reason", () => {
+  const nudity = classifyHttpError(400, { error: { code: "content_policy_violation",
+    message: "非常抱歉，生成的图片可能违反了关于裸露、色情或情色内容的防护限制。如果你认为此判断有误，请重试或修改提示语。" } });
+  assert.equal(nudity.kind, "user");
+  assert.equal(nudity.code, "moderation_blocked");
+  assert.equal(nudity.publicMessage, PUBLIC_MESSAGES.moderationSexual);
+  // A relay that answers with its own code and a text refusal.
+  const policy = classifyHttpError(400, { error: { code: "upstream_text_reply", message: "非常抱歉，生成的图片可能违反了我们的内容政策。" } });
+  assert.equal(policy.code, "moderation_blocked");
+  assert.equal(policy.publicMessage, PUBLIC_MESSAGES.moderation);
+  const official = classifyHttpError(400, { error: { code: "moderation_blocked", message: "Your request was rejected by the safety system.",
+    moderation_details: { moderation_stage: "output", categories: ["violence"] } } });
+  assert.equal(official.publicMessage, PUBLIC_MESSAGES.moderation);
 });

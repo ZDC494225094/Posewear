@@ -94,6 +94,7 @@ export function selectMenu({ options = [], value = "", onChange, label = "", pla
       if (changed) onChange?.(o.value, o);
     }
     function onKey(e) {
+      if (e.isComposing) return; // keys the input method is using while composing
       if (e.key === "ArrowDown") { e.preventDefault(); move(1); }
       else if (e.key === "ArrowUp") { e.preventDefault(); move(-1); }
       else if (e.key === "Home") { e.preventDefault(); setActive(visible.findIndex((v) => !v.option.disabled)); }
@@ -103,8 +104,11 @@ export function selectMenu({ options = [], value = "", onChange, label = "", pla
       else if (e.key === "Tab") { e.preventDefault(); close(); }
     }
 
+    const filter = (value) => { query = value.trim().toLowerCase(); render(); setActive(visible.findIndex((v) => !v.option.disabled)); };
     const search = withSearch ? h("input.select-search", { type: "search", placeholder: "搜索", "aria-label": "搜索选项",
-      oninput: (e) => { query = e.target.value.trim().toLowerCase(); render(); setActive(visible.findIndex((v) => !v.option.disabled)); } }) : null;
+      // Filter on committed text only, not on the pinyin an input method is still composing.
+      oninput: (e) => { if (!e.isComposing) filter(e.target.value); },
+      oncompositionend: (e) => filter(e.target.value) }) : null;
     pop.append(search || "", list);
     pop.addEventListener("keydown", onKey);
     render();

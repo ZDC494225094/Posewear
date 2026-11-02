@@ -8,8 +8,9 @@
 // Put "[fake:moderation]", "[fake:503]", "[fake:quota]" or "[fake:param]" in a
 // prompt to simulate the corresponding upstream error, "[fake:slow]" for a
 // response that takes 1.5 s, "[fake:1k]" for a relay that ignores the
-// requested size and always answers 1024×1024, or "[fake:nousage]" for a relay
-// that returns no token usage.
+// requested size and always answers 1024×1024, "[fake:cap2048]" for one that
+// keeps the shape but caps the long edge at 2048, or "[fake:nousage]" for a relay
+// that returns no token usage. With keepBodies, recorded requests keep their files.
 import http from "node:http";
 import { pathToFileURL } from "node:url";
 import sharp from "sharp";
@@ -52,7 +53,7 @@ function json(res, status, payload) {
   res.end(JSON.stringify(payload));
 }
 
-export function createFakeOpenAI({ log = false } = {}) {
+export function createFakeOpenAI({ log = false, keepBodies = false } = {}) {
   const requests = [];
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
@@ -70,7 +71,7 @@ export function createFakeOpenAI({ log = false } = {}) {
     let fields, files = [];
     if (isEdit) ({ fields, files } = parseMultipart(raw, req.headers["content-type"]));
     else fields = JSON.parse(raw.toString("utf8"));
-    const record = { endpoint: isEdit ? "edits" : "generations", fields, files: files.map(({ body, ...f }) => f) };
+    const record = { endpoint: isEdit ? "edits" : "generations", fields, files: files.map(({ body, ...f }) => (keepBodies ? { ...f, body } : f)) };
     requests.push(record);
     if (log) console.log(record);
 
@@ -91,7 +92,11 @@ export function createFakeOpenAI({ log = false } = {}) {
       return json(res, 400, { error: { message: "input_fidelity is not supported for this model", type: "invalid_request_error", code: "unsupported_parameter" } });
     }
 
-    const [w, h] = (prompt.includes("[fake:1k]") ? "1024x1024" : String(fields.size || "1024x1024")).split("x").map(Number);
+    let [w, h] = (prompt.includes("[fake:1k]") ? "1024x1024" : String(fields.size || "1024x1024")).split("x").map(Number);
+    if (prompt.includes("[fake:cap2048]") && Math.max(w, h) > 2048) {
+      const k = 2048 / Math.max(w, h);
+      [w, h] = [Math.round(w * k), Math.round(h * k)];
+    }
     const n = Number(fields.n || 1);
     const data = [];
     for (let i = 0; i < n; i++) {
